@@ -30,9 +30,12 @@ dependencies = [
   "protobuf==5.29.2",
 
   # --- Deep-learning core (CUDA wheels; see [tool.diyrag] note) -----------
-  # torch is the GPU runtime; install the +cu121 wheel from the CUDA index in
+  # torch is the GPU runtime; install the +cu124 wheel from the CUDA index in
   # the Dockerfile. Pinned here for reproducibility on the py-llm profile.
-  "torch==2.5.1",
+  # SECURITY: torch must be >= 2.6.0 — earlier versions carry a critical
+  # `torch.load(weights_only=True)` RCE (GHSA-53q9-r3pm-6pq6), and < 2.6.0 also
+  # re-enables the vLLM malicious-model RCE bypass CVE-2025-24357.
+  "torch==2.6.0",
   "transformers==4.47.1",        # fallback for models lacking an ONNX export
   "tokenizers==0.21.0",
 
@@ -56,7 +59,13 @@ dependencies = [
 # the Rust-native `mistral.rs` backend is the cross-platform default (§24.1).
 #   pip install '.[vllm]'   # linux + cuda only
 vllm = [
-  "vllm==0.6.6",
+  # SECURITY: >= 0.22.0 clears the critical vLLM CVEs flagged on 0.6.6 —
+  # OpenAI auth bypass (GHSA-94f4-hr76-p5j6, patched 0.22.0), Mooncake/PyNcclPipe
+  # RCE (GHSA-x3m8-f7g5-qhm7, GHSA-hj4w-hm2g-p6w5, GHSA-hjq4-87xh-g4fv) and the
+  # GroupCoordinator.recv_object deserialization issue (GHSA-pgr7-mhp5-fgjp).
+  # vLLM resolves its own torch build; the base torch>=2.6.0 pin covers the
+  # transformers/OCR path.
+  "vllm==0.22.0",
 ]
 
 # Document-AI OCR models (Surya / Marker). Pulled only when the OCR profile is
@@ -81,7 +90,7 @@ dev = [
 # / `ocr` compose profiles. Elsewhere EMBED_BACKEND/RERANK_BACKEND/LLM_BACKEND
 # default to `rust-native`/`rust-llm` and this container is never started.
 profiles = ["py-llm", "ocr"]
-cuda_note = "torch 2.5.1 expects CUDA 12.1 runtime; install torch==2.5.1+cu121 from https://download.pytorch.org/whl/cu121 inside the CUDA base image."
+cuda_note = "torch 2.6.0 expects CUDA 12.4 runtime; install torch==2.6.0+cu124 from https://download.pytorch.org/whl/cu124 inside the CUDA base image."
 
 [tool.ruff]
 line-length = 100

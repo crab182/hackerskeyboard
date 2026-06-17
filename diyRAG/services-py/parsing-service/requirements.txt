@@ -3,8 +3,9 @@
 # pyproject.toml is the source of truth; keep in sync. Versions PINNED (§19).
 #
 # Docling/Surya/Marker pull torch transitively; on a GPU node install the CUDA
-# torch wheel first (see Dockerfile / §16):
-#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+# torch wheel first (see Dockerfile / §16). SECURITY: use torch >= 2.6.0
+# (fixes torch.load RCE GHSA-53q9-r3pm-6pq6):
+#   pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 # LibreOffice/Calibre are NOT here — the Rust worker spawns them (§3.2, §6.3).
 
 # --- serving + health surface ----------------------------------------------

@@ -5,7 +5,7 @@
 # common reason to cross the Python boundary (§6.3). Pin the digest in CI
 # (§12.8). NOTE: no LibreOffice/Calibre here — the Rust worker spawns those
 # (§3.2, §6.3), so this image stays free of those large suites.
-ARG CUDA_IMAGE=nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+ARG CUDA_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 FROM ${CUDA_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -30,8 +30,9 @@ RUN groupadd --gid 10002 diyrag \
 WORKDIR /app
 
 COPY --chown=diyrag:diyrag requirements.txt ./
+# SECURITY (§12.9): torch >= 2.6.0 fixes the torch.load RCE (GHSA-53q9-r3pm-6pq6).
 RUN python -m pip install --upgrade pip \
-    && python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121 \
+    && python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124 \
     && python -m pip install -r requirements.txt
 
 COPY --chown=diyrag:diyrag app ./app

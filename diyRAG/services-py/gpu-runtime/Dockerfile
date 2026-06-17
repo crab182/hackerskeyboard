@@ -1,13 +1,13 @@
 # diyRAG gpu-runtime — inference sidecar image (MASTER_BUILD_SPEC.md §12.8, §16, §19).
 #
-# CUDA BASE NOTE (§16): the runtime needs a CUDA runtime matching torch 2.5.1
-# (CUDA 12.1). The default base below is the NVIDIA CUDA 12.1 runtime image. On
+# CUDA BASE NOTE (§16): the runtime needs a CUDA runtime matching torch 2.6.0
+# (CUDA 12.4). The default base below is the NVIDIA CUDA 12.4 runtime image. On
 # CPU-only / Windows nodes this container is NOT used — the Rust-native backend
 # runs instead (§24.1), so there is no CPU variant of this image by design.
 #
 # Pin the digest in production (§12.8: pinned base images). The tag is given
 # here for readability; replace with `@sha256:...` in CI.
-ARG CUDA_IMAGE=nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+ARG CUDA_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 FROM ${CUDA_IMAGE}
 
 # ---------------------------------------------------------------------------
@@ -42,10 +42,13 @@ WORKDIR /app
 COPY --chown=diyrag:diyrag requirements.txt requirements-vllm.txt requirements-ocr.txt ./
 ARG INSTALL_VLLM=false
 ARG INSTALL_OCR=false
+# SECURITY (§12.9): torch >= 2.6.0 fixes the torch.load RCE (GHSA-53q9-r3pm-6pq6);
+# vllm >= 0.22.0 fixes the OpenAI auth bypass + Mooncake/PyNcclPipe RCE +
+# recv_object deserialization CVEs flagged on the earlier pins.
 RUN python -m pip install --upgrade pip \
-    && python -m pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121 \
+    && python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124 \
     && python -m pip install -r requirements.txt \
-    && if [ "$INSTALL_VLLM" = "true" ]; then python -m pip install vllm==0.6.6; fi \
+    && if [ "$INSTALL_VLLM" = "true" ]; then python -m pip install vllm==0.22.0; fi \
     && if [ "$INSTALL_OCR" = "true" ]; then python -m pip install surya-ocr==0.8.3 marker-pdf==1.2.3; fi
 
 COPY --chown=diyrag:diyrag app ./app

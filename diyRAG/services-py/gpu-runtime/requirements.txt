@@ -6,9 +6,9 @@
 # (§19). vLLM and OCR extras are split into the requirements-*.txt files below so
 # the base image stays lean and only the active profile pulls heavy deps (§17).
 #
-# CUDA NOTE (§16): torch 2.5.1 expects the CUDA 12.1 runtime. Inside the CUDA base
+# CUDA NOTE (§16): torch 2.6.0 expects the CUDA 12.4 runtime. Inside the CUDA base
 # image install the matching wheel:
-#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 # On CPU-only nodes the Rust-native backend is used instead and this service is
 # not started (§24.1); a CPU torch wheel is acceptable for tests.
 
@@ -24,7 +24,8 @@ grpcio-tools==1.68.1
 protobuf==5.29.2
 
 # --- Deep-learning core (install torch from the CUDA wheel index — see note) -
-torch==2.5.1
+# SECURITY: torch >= 2.6.0 (fixes torch.load RCE GHSA-53q9-r3pm-6pq6).
+torch==2.6.0
 transformers==4.47.1
 tokenizers==0.21.0
 

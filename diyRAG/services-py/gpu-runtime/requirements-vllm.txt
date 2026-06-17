@@ -3,4 +3,8 @@
 # backend is the cross-platform default. Install on Linux/CUDA nodes only:
 #   pip install -r requirements.txt -r requirements-vllm.txt
 -r requirements.txt
-vllm==0.6.6
+# SECURITY: >= 0.22.0 clears the critical vLLM CVEs (OpenAI auth bypass
+# GHSA-94f4-hr76-p5j6; Mooncake/PyNcclPipe RCE GHSA-x3m8-f7g5-qhm7,
+# GHSA-hj4w-hm2g-p6w5, GHSA-hjq4-87xh-g4fv; recv_object deserialization
+# GHSA-pgr7-mhp5-fgjp; malicious-model RCE bypass CVE-2025-24357).
+vllm==0.22.0
