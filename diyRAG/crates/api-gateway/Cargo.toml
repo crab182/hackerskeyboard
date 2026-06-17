@@ -29,14 +29,12 @@ http = "1.1"
 tower = { workspace = true }
 tower-http = { workspace = true }
 
-# --- Rate limiting (§12.3). DECISION: pinned in this member crate, not the
-#     workspace root, because the root Cargo.toml is owned by another agent and
-#     this task must not edit files outside the three target crate dirs. The
-#     root defines `governor`; the gateway adds `tower_governor` (the Tower
-#     middleware wrapper) + `fred` (distributed Redis token buckets) here.
-#     Promote to [workspace.dependencies] in a follow-up once ownership allows. ---
+# --- Rate limiting (§12.3). The root pins `governor` (0.8); the gateway adds
+#     `tower_governor` (the Tower middleware wrapper) + `fred` (distributed Redis
+#     token buckets) here. tower_governor 0.7 is the axum-0.8-compatible release
+#     and depends on governor 0.8, so the two stay on a single governor/axum. ---
 governor = { workspace = true }
-tower_governor = "0.4"
+tower_governor = "0.7"
 fred = { version = "9.4", default-features = false, features = ["i-std"] } # Redis-backed distributed buckets (§12.3)
 
 reqwest = { workspace = true }

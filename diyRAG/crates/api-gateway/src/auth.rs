@@ -52,9 +52,11 @@ impl Credential {
         let value = header.ok_or_else(|| AppError::Unauthorized {
             message: "missing Authorization header".to_owned(),
         })?;
-        let (scheme, token) = value.split_once(' ').ok_or_else(|| AppError::Unauthorized {
-            message: "malformed Authorization header".to_owned(),
-        })?;
+        let (scheme, token) = value
+            .split_once(' ')
+            .ok_or_else(|| AppError::Unauthorized {
+                message: "malformed Authorization header".to_owned(),
+            })?;
         let token = token.trim().to_owned();
         if scheme.eq_ignore_ascii_case(API_KEY_SCHEME) {
             Ok(Credential::ApiKey(token))
@@ -129,7 +131,10 @@ async fn authenticate_jwt(state: &GatewayState, token: &str) -> Result<AuthConte
 pub struct Authenticated(pub AuthContext);
 
 impl FromRequestParts<GatewayState> for Authenticated {
-    type Rejection = AppError;
+    // The rejection must be `IntoResponse`; `AppError` is a foreign type and is
+    // not, so we reject with the crate's `GatewayError` wrapper. `?` on the
+    // `AppError`-returning calls below converts via `From<AppError>`.
+    type Rejection = crate::error::GatewayError;
 
     async fn from_request_parts(
         parts: &mut Parts,
@@ -204,6 +209,9 @@ impl Requirement {
 /// Enforce that a principal may act on a specific root (domain-scope check,
 /// spec §5.1 `domain_scope` / §12.7). Tenant ownership of the root MUST be
 /// re-verified server-side at the data layer; this is the gateway-side gate.
+// Called from `routes::proxy_passthrough` once root-id extraction lands (its
+// TODO); kept ahead of the caller so the gate exists and is reviewable.
+#[allow(dead_code)]
 pub fn check_domain_scope(domain: &DomainScope, root_id: &Uuid) -> Result<(), AppError> {
     if domain.allows_root(root_id) {
         Ok(())
@@ -217,10 +225,43 @@ pub fn check_domain_scope(domain: &DomainScope, root_id: &Uuid) -> Result<(), Ap
 /// Shared, cheaply-cloneable handle to verification material the gateway caches
 /// (e.g. the JWT public key, a negative-revocation cache). Held inside
 /// [`GatewayState`] in a follow-up.
+#[allow(dead_code)] // wired into GatewayState in a follow-up (spec §12.2)
 #[derive(Clone, Default)]
 pub struct AuthCache {
     /// PEM-encoded JWT verification key, loaded once at startup.
     pub jwt_public_key_pem: Arc<Vec<u8>>,
     // TODO: add a moka/`fred`-backed negative cache of revoked key ids for
     //       instant revocation without a DB hit on every request (§12.2).
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_api_key_and_bearer_schemes_case_insensitively() {
+        match Credential::parse(Some("ApiKey raw-secret")) {
+            Ok(Credential::ApiKey(k)) => assert_eq!(k, "raw-secret"),
+            other => panic!("expected ApiKey, got {other:?}"),
+        }
+        match Credential::parse(Some("bearer jwt.token.here")) {
+            Ok(Credential::Jwt(t)) => assert_eq!(t, "jwt.token.here"),
+            other => panic!("expected Jwt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_malformed_and_unsupported_headers_are_unauthorized() {
+        // Missing header, no scheme separator, and an unknown scheme all reject
+        // with Unauthorized (deny-by-default, spec §12.5) — never a panic.
+        for header in [None, Some("noscheme"), Some("Basic dXNlcjpwYXNz")] {
+            assert!(
+                matches!(
+                    Credential::parse(header),
+                    Err(AppError::Unauthorized { .. })
+                ),
+                "expected Unauthorized for {header:?}"
+            );
+        }
+    }
 }

@@ -10,6 +10,7 @@
 //! from `diyrag-common` carry the structured envelope.
 
 mod auth;
+mod error;
 mod ratelimit;
 mod routes;
 
@@ -19,7 +20,7 @@ use anyhow::Context;
 use axum::routing::get;
 use axum::Router;
 use diyrag_common::config::AppConfig;
-use diyrag_common::{logging, prelude::*};
+use diyrag_common::logging;
 use ratelimit::{PerKeyLimiter, RatePolicy};
 use tracing::info;
 
@@ -86,7 +87,11 @@ async fn main() -> anyhow::Result<()> {
 
 /// Assemble the router: health endpoints + versioned API + middleware stack.
 fn build_app(state: GatewayState) -> Router {
-    let api = routes::router(state.clone());
+    // `routes::router` binds the state internally and returns a stateless
+    // `Router<()>`; the public probes below are stateless too, so the assembled
+    // app needs no further `.with_state` (nesting a `Router<()>` fixes the outer
+    // state to `()`).
+    let api = routes::router(state);
 
     Router::new()
         // Public liveness/readiness (spec §11.2). No auth, no rate limit.
@@ -101,7 +106,6 @@ fn build_app(state: GatewayState) -> Router {
         // logs within a request are attributable (spec §13.1). The correlation id
         // is then re-injected on the outbound hop to core-api in `routes::proxy`.
         .layer(logging::trace_layer())
-        .with_state(state)
 }
 
 /// Liveness probe — process is up (spec §11.2).
