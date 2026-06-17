@@ -24,16 +24,19 @@ with an explanation. (Enforced by `bind_allowed`; unit-tested.)
 ## Run
 ```bash
 cd tools/launch-gate
-cargo test                 # 7 tests: gate logic, token withholding, bind policy
+cargo test                 # 8 tests: gate logic, token withholding, bind policy, probe coverage
 cargo run -- demo          # in-process: all ready → 200 + 456468ann
 cargo run -- demo-pending  # in-process: an item down → 503, token withheld
 cargo run -- serve         # serve on 127.0.0.1:8460 (probes real diyRAG services)
 cargo run -- serve --bind 192.168.1.10:8460   # LAN bind (private only)
 ```
 
-`serve` probes the real services via TCP; override targets with env vars
-`DIYRAG_PROBE_{POSTGRES,QDRANT,NATS,MINIO,REDIS,GATEWAY}` (default
-`127.0.0.1:<port>`). Until those are up, the gate stays closed.
+`serve` probes both the datastores **and** the diyRAG HTTP services via TCP, so
+"gate open" means the whole stack is up. Override targets with env vars
+`DIYRAG_PROBE_{POSTGRES,QDRANT,NATS,MINIO,REDIS,GATEWAY,CORE_API,RETRIEVAL}`
+(default `127.0.0.1:<port>`). Until every target accepts a connection, the gate
+stays closed. (The `api-gateway` `/readyz` itself probes `core-api`, so the edge
+only reports ready once its upstream is reachable.)
 
 ## How it drives the "loop until running" workflow
 On a host where the full stack can actually run (Docker + network), bring the

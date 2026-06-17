@@ -222,6 +222,17 @@ fn default_checks() -> Vec<Check> {
             name: "api-gateway",
             kind: CheckKind::Tcp(endpoint("DIYRAG_PROBE_GATEWAY", "127.0.0.1:8443")),
         },
+        // The diyRAG HTTP services themselves (behind the gateway) — so "gate
+        // open" means the whole stack is up, not just the datastores. Each binds
+        // local/LAN-only; the worker has no HTTP port yet (added in a follow-up).
+        Check {
+            name: "core-api",
+            kind: CheckKind::Tcp(endpoint("DIYRAG_PROBE_CORE_API", "127.0.0.1:8081")),
+        },
+        Check {
+            name: "retrieval",
+            kind: CheckKind::Tcp(endpoint("DIYRAG_PROBE_RETRIEVAL", "127.0.0.1:8082")),
+        },
     ]
 }
 
@@ -414,6 +425,26 @@ mod tests {
     #[test]
     fn healthz_is_always_ok() {
         assert!(respond("GET /healthz HTTP/1.1", &[]).contains("200 OK"));
+    }
+
+    #[test]
+    fn default_checks_cover_datastores_and_services() {
+        let names: Vec<&str> = default_checks().iter().map(|c| c.name).collect();
+        for expected in [
+            "postgres",
+            "qdrant",
+            "nats",
+            "minio",
+            "redis",
+            "api-gateway",
+            "core-api",
+            "retrieval",
+        ] {
+            assert!(
+                names.contains(&expected),
+                "missing probe target: {expected}"
+            );
+        }
     }
 
     #[test]
