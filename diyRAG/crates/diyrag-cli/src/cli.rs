@@ -120,8 +120,13 @@ pub struct InstallArgs {
 pub struct ServiceConfig {
     pub mode: String,
     pub auto_start: bool,
+    // Consumed by `WindowsScm::install` (SCM service account + binPath); the
+    // systemd/docker backends use the unit / compose file instead, so these read
+    // as dead on non-Windows builds.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub account: Option<String>,
     /// Absolute path to the `diyragd` executable the service launches.
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub binary_path: std::path::PathBuf,
 }
 
@@ -145,7 +150,11 @@ impl ServiceConfig {
 /// Best-effort default path to `diyragd`: the `diyragd[.exe]` sibling of this
 /// CLI executable (they ship together in the MSI / package, §16b.2).
 fn default_daemon_path() -> std::path::PathBuf {
-    let exe_name = if cfg!(windows) { "diyragd.exe" } else { "diyragd" };
+    let exe_name = if cfg!(windows) {
+        "diyragd.exe"
+    } else {
+        "diyragd"
+    };
     if let Ok(self_exe) = std::env::current_exe() {
         if let Some(dir) = self_exe.parent() {
             return dir.join(exe_name);
