@@ -35,6 +35,14 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 garde = { version = "0.20", features = ["derive", "serde"] }
 
+# --- Shared building blocks used by `common` (http extractors, config, hashing) ---
+http = "1.1"
+bytes = "1.7"
+futures = "0.3"
+hex = "0.4"
+rand = "0.8"
+figment = { version = "0.10", features = ["env", "toml"] }
+
 # --- Relational store (§3.2 / §5.1: PostgreSQL 16 via sqlx) ---
 # runtime-tokio-rustls keeps us OpenSSL-free (§12.1). uuid/chrono/json features
 # map UUIDv7 PKs, UTC timestamps, and JSONB columns to Rust types.
@@ -78,8 +86,16 @@ notify = "7.0"
 globset = "0.4"
 
 # --- Tokenization & Rust-native inference (§3.2 / §16: tokenizers + ort) ---
+# ort uses `load-dynamic` (NOT download-binaries): no build-time binary fetch
+# and no ureq/native-tls/OpenSSL — honors rustls-everywhere (§12.1) and the
+# local/LAN-only + offline default. The node provides libonnxruntime at runtime
+# via ORT_DYLIB_PATH (vendored into the image / model-cache). See ADR-0008.
 tokenizers = "0.21"
-ort = { version = "2.0.0-rc.9", features = ["cuda", "directml"] }
+ort = { version = "2.0.0-rc.9", default-features = false, features = [
+    "load-dynamic",
+    "cuda",
+    "directml",
+] }
 
 # --- CLI (§16b: diyrag CLI via clap) ---
 clap = { version = "4.5", features = ["derive", "env"] }

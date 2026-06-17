@@ -14,6 +14,13 @@ compose_dev  := "docker compose -f docker-compose.yml -f docker-compose.dev.yml"
 default:
     @just --list
 
+# --- Config / secrets --------------------------------------------------------
+
+# Generate a local .env with strong secrets from .env.example (gitignored;
+# never commit). Pass `--force` to regenerate over an existing .env.
+bootstrap-env *ARGS:
+    bash scripts/gen-env.sh {{ARGS}}
+
 # --- Stack lifecycle ---------------------------------------------------------
 
 # Bring up the base stack (Linux/unraid primary path, §16b.3)

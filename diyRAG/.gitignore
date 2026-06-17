@@ -98,3 +98,8 @@ desktop.ini
 .idea/
 .vscode/
 *.swp
+
+# Offline/air-gapped build (scripts/vendor.sh) — large, machine-generated
+/vendor/
+/.cargo/config.toml
+.cargo/config.toml
