@@ -81,6 +81,7 @@ static SELECTED_MODE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 /// Blocks on `service_dispatcher::start`, which only returns once the service
 /// has stopped. `mode_raw` is the `--mode` value parsed from argv.
 pub fn run(mode_raw: String) -> Result<()> {
+    init_tracing();
     // Best-effort: register the Event Log source so start/stop lines have a home.
     // Registration of the source key itself is done by the installer (it needs
     // admin); here we only initialise the logger handle.
@@ -88,9 +89,66 @@ pub fn run(mode_raw: String) -> Result<()> {
     let _ = SELECTED_MODE.set(mode_raw);
 
     // Hands control to the SCM; calls `ffi_service_main` → `service_main`.
+    // NOTE (windows-service 0.7): if the process was NOT launched by the SCM,
+    // `service_dispatcher::start` fails with
+    // ERROR_FAILED_SERVICE_CONTROLLER_CONNECT (1063). The interactive console
+    // path uses [`run_interactive`] instead, so this is only reached under SCM.
     service_dispatcher::start(SERVICE_NAME, ffi_service_main)
         .map_err(|e| anyhow::anyhow!("failed to start SCM service dispatcher: {e}"))?;
     Ok(())
+}
+
+/// Interactive (non-SCM) run for a developer console on Windows.
+///
+/// Mirrors the Unix foreground runner: build a Tokio runtime, start the
+/// [`Supervisor`], and cancel on Ctrl-C (`tokio::signal::ctrl_c`, which maps to
+/// the Windows console `CTRL_C_EVENT`). This is the path taken by `diyragd run`
+/// / bare `diyragd` on Windows — it does NOT talk to the SCM (spec §16b.2: the
+/// SCM path is the `service` subcommand only).
+pub fn run_interactive(mode_raw: String) -> Result<()> {
+    init_tracing();
+    let mode = RunMode::parse(&mode_raw)?;
+    tracing::info!(?mode, "diyragd starting (windows: interactive console)");
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow::anyhow!("failed to build Tokio runtime: {e}"))?;
+
+    runtime.block_on(async move {
+        let supervisor = Supervisor::new(mode);
+        let cancel = CancellationToken::new();
+        let supervisor_cancel = cancel.clone();
+        let task = tokio::spawn(async move { supervisor.run(supervisor_cancel).await });
+
+        // Ctrl-C → graceful drain.
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::warn!(error = %e, "failed to listen for Ctrl-C; cancelling anyway");
+        }
+        tracing::info!("Ctrl-C received; cancelling supervisor (graceful drain)");
+        cancel.cancel();
+
+        match task.await {
+            Ok(result) => result,
+            Err(join_err) => Err(anyhow::anyhow!("supervisor task panicked: {join_err}")),
+        }
+    })?;
+
+    tracing::info!("diyragd stopped (drained)");
+    Ok(())
+}
+
+/// Best-effort tracing init for the Windows paths (rolling stdout JSON, §13.1).
+///
+/// DECISION: kept self-contained (not `diyrag_common::logging`) to match the
+/// Unix path until the typed config crate is wired here. The Windows **Event
+/// Log** sink is initialised separately in [`init_event_log`]; this provides the
+/// structured-JSON file/console stream the spec also requires (§16b.2).
+fn init_tracing() {
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = fmt().json().with_env_filter(filter).try_init();
 }
 
 /// Initialise the Windows Event Log `tracing`/logging sink (§16b.2). The source

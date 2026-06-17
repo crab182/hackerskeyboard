@@ -1,0 +1,75 @@
+[package]
+name = "diyrag-core-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "diyRAG core API: file/root management, file-watching, batch orchestration, retention/logical-delete, and RAG orchestration (MASTER_BUILD_SPEC.md §6, §7, §11)."
+publish = false
+
+[[bin]]
+name = "diyrag-core-api"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+# Shared library (config/logging/errors/auth/db/schemas/vector/blob) — §4.
+diyrag-common = { path = "../common" }
+
+# --- Async runtime, traits, web framework (§3.2) ---
+tokio = { workspace = true }
+tokio-util = "0.7" # CancellationToken for cooperative shutdown (§16b)
+async-trait = { workspace = true }
+
+axum = { workspace = true }
+http = "1.1"
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# --- Broker: NATS JetStream work-unit publish (§6.2 / §6.7) ---
+async-nats = { workspace = true }
+futures = "0.3"
+
+# --- Persistence: Postgres + Qdrant (retention) + blob (§5 / §6.6) ---
+sqlx = { workspace = true }
+qdrant-client = { workspace = true }
+object_store = { workspace = true }
+bytes = "1.9"
+
+# --- Serialization + validation (§5.4 / §11.1) ---
+serde = { workspace = true }
+serde_json = { workspace = true }
+garde = { workspace = true }
+
+# --- IDs / hashing / content typing (§6.2 idempotency, §6.3 MIME sniff) ---
+uuid = { workspace = true }
+sha2 = { workspace = true }
+infer = { workspace = true }
+chrono = { workspace = true }
+
+# --- File watching + glob include/exclude (§6.1) ---
+notify = { workspace = true }
+globset = { workspace = true }
+
+# --- HTTP clients to retrieval + gpu-runtime (§7 RAG orchestration) ---
+reqwest = { workspace = true }
+
+# --- Archive / zip-bomb guard for batch submit (§6.7 / §22 #6).
+#     DECISION: pinned in this member crate, not the workspace root, because the
+#     root Cargo.toml is owned by another agent and this task must not edit files
+#     outside the target crate dirs. Promote to [workspace.dependencies] later. ---
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1.0"
+
+# --- Errors, config, tracing (§14 / §19) ---
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

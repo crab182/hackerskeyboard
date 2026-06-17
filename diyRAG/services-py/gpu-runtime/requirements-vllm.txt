@@ -1,0 +1,6 @@
+# gpu-runtime — vLLM throughput profile (Linux/CUDA only) (MASTER_BUILD_SPEC.md §16, §24.1).
+# Selected by the `py-llm` compose profile. Optional: the Rust-native `mistral.rs`
+# backend is the cross-platform default. Install on Linux/CUDA nodes only:
+#   pip install -r requirements.txt -r requirements-vllm.txt
+-r requirements.txt
+vllm==0.6.6

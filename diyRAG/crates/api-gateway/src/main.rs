@@ -20,6 +20,7 @@ use axum::routing::get;
 use axum::Router;
 use diyrag_common::config::AppConfig;
 use diyrag_common::{logging, prelude::*};
+use ratelimit::{PerKeyLimiter, RatePolicy};
 use tracing::info;
 
 /// Shared, cheaply-cloneable gateway state injected into handlers.
@@ -31,6 +32,8 @@ pub struct GatewayState {
     pub http: reqwest::Client,
     /// Base URL of the upstream `core-api`.
     pub core_api_base: String,
+    /// Per-principal token-bucket limiter for the expensive answer path (§12.3).
+    pub answer_limiter: Arc<PerKeyLimiter>,
 }
 
 #[tokio::main]
@@ -57,6 +60,7 @@ async fn main() -> anyhow::Result<()> {
             .context("building proxy http client")?,
         // TODO: source from config (e.g. AppConfig::upstreams.core_api).
         core_api_base: "https://core-api:8081".to_owned(),
+        answer_limiter: Arc::new(PerKeyLimiter::new(RatePolicy::ANSWER)),
     };
 
     // 4. Build the Axum app with the full middleware stack + routes.
@@ -88,16 +92,16 @@ fn build_app(state: GatewayState) -> Router {
         // Public liveness/readiness (spec §11.2). No auth, no rate limit.
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
-        // Versioned, protected API surface.
+        // Versioned, protected API surface. CORS, request-body-size cap, per-IP
+        // rate limiting, authN/Z (per-route), and schema validation are applied
+        // INSIDE `routes::router` so they wrap only the protected surface and the
+        // public probes stay unthrottled (spec §11.2, §12.3).
         .nest("/api/v1", api)
-        // Cross-cutting middleware. Order matters: correlation-id first (so all
-        // downstream layers/logs see it), then trace, CORS, body limit, rate
-        // limit, authN/Z (applied within `routes`/`auth`).
+        // Trace layer opens a per-request span carrying the correlation id so all
+        // logs within a request are attributable (spec §13.1). The correlation id
+        // is then re-injected on the outbound hop to core-api in `routes::proxy`.
         .layer(logging::trace_layer())
         .with_state(state)
-    // TODO: add CORS layer (tower_http::cors from config.http.cors_allowed_origins),
-    // RequestBodyLimitLayer (config.http.max_body_bytes), tower_governor rate
-    // limit (ratelimit::layer), and a correlation-id injection layer (spec §12.3).
 }
 
 /// Liveness probe — process is up (spec §11.2).

@@ -1,0 +1,77 @@
+# diyRAG MCP server (MASTER_BUILD_SPEC.md §8).
+#
+# Exposes the RAG platform as Model Context Protocol tools/resources to LLM
+# clients (Claude Desktop, Cursor, OpenAI Agents, …) over Streamable HTTP
+# (stateless) and stdio, using the official Rust MCP SDK `rmcp`. It is a THIN
+# protocol adapter over `core-api` that enforces the SAME tenant scoping + RBAC
+# as the REST API — never a privilege bypass (§8 / §12).
+[package]
+name = "diyrag-mcp-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "diyRAG MCP server: rmcp tools/resources over Streamable HTTP (stateless) + stdio, same RBAC as REST (MASTER_BUILD_SPEC.md §8)."
+publish = false
+
+[[bin]]
+name = "diyrag-mcp-server"
+path = "src/main.rs"
+
+[lints.rust]
+# §19 / §12.8: no unsafe in service crates.
+unsafe_code = "forbid"
+
+[dependencies]
+# Shared library (config/logging/errors/auth) — §4.
+# DECISION: depend via path per the scaffolding task instruction.
+diyrag-common = { path = "../common" }
+
+# --- Official Rust MCP SDK (§8). ---
+# DECISION: `rmcp` is pinned in this member crate (not at the workspace root,
+# which is owned by another agent and must not be edited by this task). Current
+# crates.io release is 0.16.x; we pin a caret on the latest known-good minor and
+# enable exactly the transports the spec requires:
+#   * server / macros              → ServerHandler + #[tool_router]/#[tool]
+#   * transport-streamable-http-server → Streamable HTTP (stateless, §8)
+#   * transport-io                 → stdio transport for local clients (§8)
+# SSE is deprecated by the spec and intentionally NOT enabled (§8).
+rmcp = { version = "0.16", features = [
+    "server",
+    "macros",
+    "transport-streamable-http-server",
+    "transport-io",
+] }
+# JSON Schema derivation for tool parameter structs (required by rmcp macros).
+schemars = "0.8"
+
+# --- Async runtime, traits (§3.2) ---
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+async-trait = { workspace = true }
+
+# --- HTTP: Streamable HTTP transport is served via Axum; CORS for browser MCP
+#     clients (§8). ---
+axum = { workspace = true }
+tower-http = { workspace = true, features = ["cors"] }
+
+# --- Adapter calls into core-api over its REST/gRPC surface (§8 thin adapter). ---
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+
+# --- Auth: OAuth2.1 / mTLS; tenant scope SERVER-derived (§8 / §12.7). ---
+jsonwebtoken = { workspace = true }
+
+# --- Serialization, IDs, time ---
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# --- Errors, config, logging (§14 / §19) ---
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
