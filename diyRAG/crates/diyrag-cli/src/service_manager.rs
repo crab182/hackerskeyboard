@@ -135,13 +135,6 @@ impl WindowsScm {
             service_name: std::ffi::OsString::from(Self::SERVICE_NAME),
         }
     }
-}
-
-#[cfg(windows)]
-impl Default for WindowsScm {
-    fn default() -> Self {
-        Self::new()
-    }
 
     /// Open the SCM with the access level needed for an operation.
     fn open_manager(
@@ -151,6 +144,13 @@ impl Default for WindowsScm {
         // `None` target = the local machine, `None` database = the active SCM db.
         Scm::local_computer(None::<&str>, access)
             .context("opening the Windows Service Control Manager (need admin rights)")
+    }
+}
+
+#[cfg(windows)]
+impl Default for WindowsScm {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -193,20 +193,14 @@ impl ServiceManager for WindowsScm {
             // Low-privilege account (e.g. `NT SERVICE\diyRAG`) — never
             // LocalSystem unless GPU access requires it (§12.8 / §16b.2). `None`
             // means LocalSystem; the CLI passes `Some(account)` from --account.
-            account_name: cfg
-                .account
-                .as_deref()
-                .map(std::ffi::OsString::from),
+            account_name: cfg.account.as_deref().map(std::ffi::OsString::from),
             // Password for a domain/managed account; virtual accounts need none.
             account_password: None,
         };
 
         // Right to set the description + failure actions after create.
         let service = scm
-            .create_service(
-                &info,
-                ServiceAccess::CHANGE_CONFIG | ServiceAccess::START,
-            )
+            .create_service(&info, ServiceAccess::CHANGE_CONFIG | ServiceAccess::START)
             .context("creating the diyRAG service (sc.exe create … start= auto)")?;
 
         service
@@ -218,8 +212,7 @@ impl ServiceManager for WindowsScm {
         // (equivalent: `sc.exe failure diyRAG reset= 86400 actions= restart/5000/restart/10000/restart/30000`).
         {
             use windows_service::service::{
-                ServiceAction, ServiceActionType, ServiceFailureActions,
-                ServiceFailureResetPeriod,
+                ServiceAction, ServiceActionType, ServiceFailureActions, ServiceFailureResetPeriod,
             };
             let actions = ServiceFailureActions {
                 // Reset the failure counter after 1 day of healthy uptime.
@@ -298,7 +291,10 @@ impl ServiceManager for WindowsScm {
         let _status = service
             .stop()
             .context("stopping the diyRAG service (sc.exe stop)")?;
-        tracing::info!(service = Self::SERVICE_NAME, "stop requested (graceful drain)");
+        tracing::info!(
+            service = Self::SERVICE_NAME,
+            "stop requested (graceful drain)"
+        );
         Ok(())
     }
 
@@ -351,13 +347,6 @@ impl Systemd {
             unit: Self::UNIT.to_string(),
         }
     }
-}
-
-#[cfg(unix)]
-impl Default for Systemd {
-    fn default() -> Self {
-        Self::new()
-    }
 
     /// Run `systemctl <args…>` and map a non-zero exit to an error.
     fn systemctl(&self, args: &[&str]) -> Result<()> {
@@ -369,6 +358,13 @@ impl Default for Systemd {
             anyhow::bail!("`systemctl {}` failed: {status}", args.join(" "));
         }
         Ok(())
+    }
+}
+
+#[cfg(unix)]
+impl Default for Systemd {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -515,7 +511,10 @@ mod tests {
         let dc = DockerCompose::new();
         assert_eq!(dc.compose_file, "docker-compose.yml");
         let dc = dc.with_compose_file("/mnt/user/appdata/diyrag/docker-compose.yml");
-        assert_eq!(dc.compose_file, "/mnt/user/appdata/diyrag/docker-compose.yml");
+        assert_eq!(
+            dc.compose_file,
+            "/mnt/user/appdata/diyrag/docker-compose.yml"
+        );
         assert_eq!(dc.name(), "docker-compose");
     }
 
