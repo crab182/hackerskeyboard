@@ -1,0 +1,49 @@
+# diyRAG terminal control plane `diyrag` (MASTER_BUILD_SPEC.md §16b.1).
+#
+# `diyrag` is the single CLI, identical on Windows, unraid, and generic Linux
+# (acceptance #9). It manages the OS service (Windows SCM / systemd / Docker
+# Compose) and drives the REST API headlessly (ingest/query/batch/node).
+[package]
+name = "diyrag-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "diyRAG control CLI `diyrag`: service install/start/stop, node ops, ingest, batch, query, config (MASTER_BUILD_SPEC.md §16b)."
+publish = false
+
+# The user-facing binary is `diyrag` (matches `diyrag service install`, the
+# docs, and the install scripts in spec §16b.2 / §16b.3).
+[[bin]]
+name = "diyrag"
+path = "src/main.rs"
+
+[lints.rust]
+# §19 / §12.8: no unsafe in this crate. The `windows-service` crate owns the FFI;
+# we only call its safe API surface.
+unsafe_code = "forbid"
+
+[dependencies]
+# --- CLI, async runtime, errors, logging (§3.2 / §16b / §19) ---
+clap = { workspace = true }            # derive command tree (§16b.1)
+tokio = { workspace = true }           # async REST calls + process spawning
+anyhow = { workspace = true }          # binary-boundary errors (§19)
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# --- REST client + (de)serialization (§16b.1: drive the API headlessly) ---
+# rustls keeps us OpenSSL-free (§12.1); json for typed request/response bodies.
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+# Windows SCM integration for `diyrag service install|…` (§16b.2). Target-gated
+# so the CLI still builds on Linux/unraid (Systemd / DockerCompose impls).
+# Versions inherited from [workspace.dependencies] (windows-service = "0.7").
+windows-service = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

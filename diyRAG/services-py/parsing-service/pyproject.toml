@@ -1,0 +1,76 @@
+[project]
+name = "diyrag-parsing-service"
+version = "0.1.0"
+description = "diyRAG hard-parse sidecar: Docling + Surya/Marker for scanned/complex/layout-heavy documents. Called by the Rust ingestion-worker only when its native parser router decides a document is 'hard'."
+requires-python = ">=3.11"
+license = { text = "see repo LICENSE" }
+readme = "README.md"
+
+# ---------------------------------------------------------------------------
+# Dependency policy (MASTER_BUILD_SPEC.md §3.2, §6.3, §19)
+# ---------------------------------------------------------------------------
+# One of exactly TWO Python services. Confined to deep-learning document AI:
+# Docling (layout+tables), Surya/Marker (GPU OCR). The common, well-formed
+# document path is 100% Rust (§21) and never touches this service.
+#
+# NOTE: LibreOffice / Calibre are spawned as sandboxed CHILD PROCESSES BY THE
+# RUST WORKER (§3.2, §6.3), NOT here — so there is no soffice/ebook-convert
+# dependency in this service.
+#
+# Versions are PINNED (§19). Heavy GPU OCR deps (surya/marker) and Docling are
+# split into requirements files so a layout-only node can stay lean.
+dependencies = [
+  # --- serving + health surface (FastAPI; gRPC path via grpcio — §6.3) ------
+  "fastapi==0.115.6",
+  "uvicorn[standard]==0.34.0",
+  "pydantic==2.10.4",
+  "python-json-logger==3.2.1",
+
+  # --- gRPC (Rust ingestion-worker can call over tonic<->grpcio) ------------
+  "grpcio==1.68.1",
+  "grpcio-tools==1.68.1",
+  "protobuf==5.29.2",
+
+  # --- document AI (hard parse) ---------------------------------------------
+  "docling==2.15.1",       # layout + table structure
+  "surya-ocr==0.8.3",      # GPU OCR (detection + recognition + tables)
+  "marker-pdf==1.2.3",     # high-fidelity PDF -> markdown/structure
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.4",
+  "pytest-asyncio==0.25.0",
+  "httpx==0.28.1",
+  "mypy==1.14.1",
+  "ruff==0.8.4",
+  "black==24.10.0",
+]
+
+[tool.diyrag]
+# Brought up only when the Rust router needs hard parses; on a zero-Python
+# deployment it can be omitted entirely with the §24.6 quality trade-off
+# (Rust-native ocrs/tesseract).
+profiles = ["parsing", "ocr"]
+note = "LibreOffice/Calibre are spawned by the Rust worker, not this service (§3.2, §6.3)."
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"

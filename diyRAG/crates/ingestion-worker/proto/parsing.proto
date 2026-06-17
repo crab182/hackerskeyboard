@@ -1,0 +1,55 @@
+// diyRAG parsing-service gRPC contract (sketch) — MASTER_BUILD_SPEC.md §3.3 / §6.3.
+//
+// The Rust ingestion-worker is a CLIENT of this service. It is called ONLY when
+// the Rust-native parser router decides a document is "hard" (low text density,
+// OCR needed, complex tables). The Python parsing-service (Docling + Surya/Marker)
+// implements the server. Transport is HTTP/2 + mTLS (§12.1).
+//
+// Documents are passed by content-addressed blob key; the service fetches bytes
+// from the shared blob store so large payloads never traverse gRPC frames.
+
+syntax = "proto3";
+
+package diyrag.parsing.v1;
+
+// Hard-parse + OCR service implemented by the Python parsing-service.
+service ParsingService {
+  // Parse a scanned/complex document, returning normalized structured text.
+  rpc OcrParse(OcrParseRequest) returns (StructuredDocPb);
+  // Liveness probe (mirrors the HTTP /healthz contract, §0).
+  rpc Health(HealthRequest) returns (HealthReply);
+}
+
+message OcrParseRequest {
+  string blob_key = 1;        // sha256/{first2}/{sha256}
+  string declared_name = 2;   // for handler hinting only; never trust-bearing
+  string content_sha256 = 3;  // idempotency + integrity check
+  bool force_ocr = 4;         // skip the density heuristic
+  string correlation_id = 5;  // propagated for tracing (§13.1)
+}
+
+// Mirrors the Rust `StructuredDoc` (§6.3) so mapping is mechanical.
+message StructuredDocPb {
+  repeated BlockPb blocks = 1;
+  optional string lang = 2;
+  optional uint32 page_count = 3;
+}
+
+message BlockPb {
+  string text = 1;
+  StructureType structure_type = 2;
+  optional string section_heading = 3;
+  optional uint32 page_number = 4;
+}
+
+enum StructureType {
+  STRUCTURE_TYPE_UNSPECIFIED = 0;
+  PROSE = 1;
+  TABLE = 2;
+  HEADING = 3;
+  CODE = 4;
+  TRIPLE = 5;
+}
+
+message HealthRequest {}
+message HealthReply { bool ok = 1; }

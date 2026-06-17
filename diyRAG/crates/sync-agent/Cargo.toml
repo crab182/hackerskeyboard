@@ -1,0 +1,90 @@
+# diyRAG LAN multi-instance sync agent (MASTER_BUILD_SPEC.md §9).
+#
+# `sync-agent` makes cooperating LAN instances converge on (a) the processed-file
+# registry and (b) the retrievable vector corpus, over mutually-authenticated TLS,
+# surviving partitions. It discovers peers (mdns-sd + static list, admin cert
+# pinning), exchanges registry diffs as a version-vector CRDT (deterministic
+# tiebreak; NO wall-clock LWW), and replicates Qdrant snapshots + content-addressed
+# blobs by hash. Transport is tonic gRPC over mTLS (rustls), rate-limited.
+[package]
+name = "diyrag-sync-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "diyRAG LAN sync agent: mDNS discovery + cert pinning, version-vector registry CRDT, Qdrant snapshot + blob replication over mTLS gRPC (MASTER_BUILD_SPEC.md §9)."
+publish = false
+
+[[bin]]
+name = "diyrag-sync-agent"
+path = "src/main.rs"
+
+[lints.rust]
+# §19 / §12.8: no unsafe in service crates.
+unsafe_code = "forbid"
+
+[dependencies]
+# Shared library (config/logging/errors/auth/db/schemas/vector/blob) — §4.
+# DECISION: depend via path (not `workspace = true`) per the scaffolding task
+# instruction; functionally identical since `common` is a workspace member.
+diyrag-common = { path = "../common" }
+
+# --- Async runtime, traits (§3.2) ---
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
+tokio-util = { version = "0.7", features = ["rt"] } # CancellationToken graceful drain (§16b.2)
+async-trait = { workspace = true }
+futures = "0.3"
+
+# --- gRPC + protobuf over mTLS (§9 transport / §12.1) ---
+tonic = { workspace = true }
+prost = { workspace = true }
+
+# --- TLS / PKI for mutual TLS (§12.1). rustls verifiers pin peer certs (§9). ---
+rustls = { workspace = true }
+
+# --- Vector store (Qdrant snapshot pull/apply, §9) ---
+qdrant-client = { workspace = true }
+
+# --- Blob store: content-addressed fetch-by-hash (§5.3 / §9) ---
+object_store = { workspace = true }
+bytes = "1.9"
+
+# --- LAN discovery (§9: mdns-sd + static peers) ---
+mdns-sd = { workspace = true }
+
+# --- DoS protection: token-bucket rate-limit on the sync endpoint (§9). ---
+# DECISION: `governor` is pinned at the workspace root and used directly here
+# (the in-process token bucket), rather than `tower_governor`, because the sync
+# RPC server is tonic (gRPC), not an Axum/Tower-HTTP stack. Reversible: wrap in a
+# tower layer later if the sync server is fronted by Axum.
+governor = { workspace = true }
+
+# --- Persistence: registry CRDT rows live in Postgres `sync_state` (§5.1 / §9) ---
+sqlx = { workspace = true }
+
+# --- IDs / hashing (content addressing, §5.3) ---
+uuid = { workspace = true }
+sha2 = { workspace = true }
+hex = "0.4"
+
+# --- Serialization, time ---
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+
+# --- HTTP client for chunked blob fetch over mTLS (§9). ---
+reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
+
+# --- Errors, config, logging (§14 / §19) ---
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[build-dependencies]
+# Compiles proto/sync.proto into tonic server + client stubs (§9).
+tonic-build = "0.12"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

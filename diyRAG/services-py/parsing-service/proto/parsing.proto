@@ -1,0 +1,97 @@
+// diyRAG parsing-service gRPC contract (MASTER_BUILD_SPEC.md §3.3, §6.3).
+//
+// This mirrors the FastAPI/Pydantic schema in app/schemas.py so the wire shape
+// is identical whether a node calls over HTTP/JSON or gRPC. The Rust
+// ingestion-worker uses `tonic`; this service can be served with grpcio
+// (grpcio-tools generates the Python stubs). The HTTP surface is the default
+// (more reversible — see app/main.py DECISION note); this proto keeps the gRPC
+// path open without a schema rewrite.
+//
+// Generate Python stubs:
+//   python -m grpc_tools.protoc -I proto --python_out=app/gen \
+//          --grpc_python_out=app/gen proto/parsing.proto
+
+syntax = "proto3";
+
+package diyrag.parsing.v1;
+
+// StructureType mirrors Postgres chunks.structure_type (§5.1).
+enum StructureType {
+  STRUCTURE_TYPE_UNSPECIFIED = 0;
+  PROSE = 1;
+  TABLE = 2;
+  HEADING = 3;
+  CODE = 4;
+  TRIPLE = 5;
+}
+
+message BBox {
+  double x0 = 1;
+  double y0 = 2;
+  double x1 = 3;
+  double y1 = 4;
+}
+
+message TextBlock {
+  string text = 1;
+  StructureType structure_type = 2;
+  optional uint32 page_number = 3;
+  optional string section_heading = 4;
+  optional BBox bbox = 5;
+  optional uint32 heading_level = 6;
+  uint32 ordinal = 7;
+  optional float confidence = 8;
+}
+
+message ParseHints {
+  optional string mime = 1;
+  bool force_ocr = 2;
+  repeated string languages = 3;
+  optional uint32 max_pages = 4;
+  optional uint32 timeout_secs = 5;
+}
+
+message ParseHardRequest {
+  // Exactly one of blob_ref / inline_bytes is set.
+  optional string blob_ref = 1;      // content-addressed sha256 key (§5.3)
+  optional bytes inline_bytes = 2;   // small/inline payload
+  optional string content_sha256 = 3;
+  ParseHints hints = 4;
+}
+
+message StructuredDoc {
+  repeated TextBlock blocks = 1;
+  optional uint32 page_count = 2;
+  optional string lang = 3;
+  string parser = 4;        // 'docling' | 'surya' | 'marker'
+  bool ocr_used = 5;
+  optional string content_sha256 = 6;
+}
+
+message ParseError {
+  string classification = 1; // 'TRANSIENT' | 'PERMANENT' (§14)
+  string code = 2;           // PARSE-TIMEOUT | PARSE-OOM | PARSE-UNSUPPORTED ...
+  string message = 3;
+}
+
+message ParseHardResponse {
+  oneof result {
+    StructuredDoc doc = 1;
+    ParseError error = 2;
+  }
+}
+
+message HealthRequest {}
+message HealthResponse { string status = 1; }
+message ReadyResponse {
+  bool ready = 1;
+  bool docling_loaded = 2;
+  bool ocr_loaded = 3;
+}
+
+service ParsingService {
+  // Hard parse: scanned/complex/layout-heavy docs the Rust router can't handle.
+  rpc ParseHard(ParseHardRequest) returns (ParseHardResponse);
+  rpc Healthz(HealthRequest) returns (HealthResponse);
+  rpc Readyz(HealthRequest) returns (ReadyResponse);
+}

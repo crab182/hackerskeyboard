@@ -1,0 +1,98 @@
+# diyRAG — Caddy reverse proxy (MASTER_BUILD_SPEC.md §3.2, §11.1, §12.1, §12.3, §12.8).
+#
+# Caddy sits in front of the Rust `api-gateway` and terminates public TLS (or
+# passes through to the gateway's own rustls listener). It provides auto-TLS,
+# HTTP/2, security headers, and routing. The gateway itself still enforces
+# authN/authZ, rate-limiting, and schema validation — Caddy is NOT a security
+# boundary substitute (§12.3).
+#
+# NO secrets in this file. Hostnames/ports/upstreams come from environment
+# variables resolved at container start (Caddy supports {$VAR} expansion).
+# Provide them via .env / Docker secrets (§17): DIYRAG_PUBLIC_HOST,
+# DIYRAG_GATEWAY_UPSTREAM, DIYRAG_TLS_EMAIL, etc.
+
+{
+	# Global options.
+	# Auto-TLS via ACME for a public host; for LAN/homelab use the internal CA
+	# (see ../ca/) and `tls` directive below, or `tls internal` for Caddy's own
+	# local CA. Email is for ACME notices only (not a secret).
+	email {$DIYRAG_TLS_EMAIL}
+	# TLS 1.3 preferred, 1.2 floor (§12.1). Caddy negotiates modern suites by default.
+	servers {
+		protocols h1 h2
+	}
+	# Uncomment to disable public ACME and use only the internal/local CA on a LAN:
+	# auto_https disable_redirects
+}
+
+# ---------------------------------------------------------------------------
+# Reusable security-header snippet (§12.3, §12.8). Strict, API-oriented.
+# ---------------------------------------------------------------------------
+(security_headers) {
+	header {
+		# HSTS (2y, subdomains, preload). Only meaningful over real TLS.
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Conservative default CSP for the API/host page; the SPA tightens its own.
+		Content-Security-Policy "default-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		# Never leak the upstream/server software.
+		-Server
+		-X-Powered-By
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Public site: terminate TLS, add headers, reverse-proxy to the api-gateway.
+# ---------------------------------------------------------------------------
+{$DIYRAG_PUBLIC_HOST} {
+	import security_headers
+
+	# Cap request body size at the edge (the gateway enforces its own limits too).
+	request_body {
+		max_size 100MB
+	}
+
+	# WebSocket (WSS) for realtime job/sync streams (§10.5) is handled
+	# transparently by reverse_proxy (Upgrade/Connection passthrough).
+	reverse_proxy {$DIYRAG_GATEWAY_UPSTREAM} {
+		# Propagate the correlation id (§13.1) if the client supplied one; the
+		# gateway generates one when absent.
+		header_up X-Correlation-ID {http.request.header.X-Correlation-ID}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Real-IP {remote_host}
+
+		# --- mTLS to the gateway (east-west) — §12.1 -----------------------
+		# In production the hop from Caddy to the api-gateway is itself mTLS.
+		# Certs come from the internal CA (../ca/), mounted read-only, NEVER
+		# baked into the image (§12.1). Uncomment and point at mounted paths:
+		# transport http {
+		#   tls
+		#   tls_client_auth /run/secrets/caddy-client.crt /run/secrets/caddy-client.key
+		#   tls_trust_pool file /run/secrets/diyrag-ca.crt
+		# }
+
+		health_uri /healthz
+		health_interval 10s
+		health_timeout 3s
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# ---------------------------------------------------------------------------
+# LAN / homelab variant (no public DNS): serve on an internal name with Caddy's
+# local CA, or front the gateway directly. Activate by setting
+# DIYRAG_PUBLIC_HOST to e.g. https://diyrag.local and using `tls internal`.
+# ---------------------------------------------------------------------------
+# diyrag.local {
+# 	import security_headers
+# 	tls internal
+# 	reverse_proxy {$DIYRAG_GATEWAY_UPSTREAM}
+# }

@@ -1,0 +1,182 @@
+<?xml version="1.0"?>
+<!--
+  ============================================================================
+  diyRAG — unraid Community Applications (CA) container template
+  ============================================================================
+  MASTER_BUILD_SPEC.md §16b.3 (unraid deployment), §17, §12.8 + §22 #14
+  (no --privileged, scoped GPU, only gateway/sync ports), §14 (recovery).
+
+  WHAT THIS TEMPLATE DEPLOYS
+  --------------------------
+  ONE container, `diyrag-stack`, running the supervisor `diyragd --mode agent`.
+  In `agent` mode diyragd orchestrates the rest of the stack and reports health
+  (§16b.1). This is the simplest "one tile in the unraid Docker tab" model.
+
+  DECISION: single orchestrator container vs. per-service containers.
+    * Single `diyrag-stack` (this template): one CA tile, one place to start/
+      stop, agent mode brings up core-api/retrieval/workers/etc. Easiest for a
+      homelab.
+    * Per-service (ALTERNATIVE): for fine-grained control / scaling, deploy each
+      crate as its own container using the repo's docker-compose.yml via the
+      Docker Compose Manager plugin instead of this CA template
+      (see docker-compose.notes.md). The compose path is the PRIMARY one in the
+      spec; this CA template is the convenience tile.
+
+  PORTS (kept consistent with docker-compose.yml)
+    * 8443  api-gateway   — WebUI / REST+WS  (the ONLY app port published, §12.8)
+    * 7443  sync-agent    — tonic gRPC + mTLS to peer LAN nodes (2nd exposed port)
+    Nothing else is published (east-west stays internal — §12.8 / §22 #14).
+
+  APPDATA (host -> container), all under /mnt/user/appdata/diyrag:
+    postgres, qdrant, minio, models, certs   (§16b.3)
+
+  GPU (optional): NVIDIA passthrough via Extra Parameters + env, scoped — NOT
+  --privileged (§22 #14). Requires the unraid "Nvidia Driver" plugin.
+
+  RESTART: unless-stopped, so the container returns after an unraid reboot /
+  array start (the Linux analog of the Windows Service autostart, §16b.3).
+
+  SECRETS: every value below is a PLACEHOLDER. Real secrets live in
+  /mnt/user/appdata/diyrag/config/.env (referenced via --env-file), never in
+  this template or in git (§12.1, §19).
+  ============================================================================
+-->
+<Container version="2">
+  <Name>diyrag-stack</Name>
+  <!-- PLACEHOLDER image coordinates; replace with your published image/tag. -->
+  <Repository>ghcr.io/diyrag/diyragd:latest</Repository>
+  <Registry>https://ghcr.io/diyrag/diyragd</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>                <!-- §12.8 / §22 #14: never privileged -->
+  <Support>https://github.com/diyrag/diyrag/issues</Support>
+  <Project>https://github.com/diyrag/diyrag</Project>
+  <Overview>
+    diyRAG self-hosted Retrieval-Augmented Generation platform (Rust-first).
+    This tile runs the diyragd supervisor in `agent` mode, which orchestrates
+    the full stack (api-gateway, core-api, retrieval, ingestion-worker(s),
+    mcp-server, sync-agent) and the Rust-native inference backend. Control it
+    headlessly from the unraid terminal with the `diyrag` CLI
+    (diyrag ingest /mnt/user/Documents --watch ; diyrag query "..." --answer ;
+    diyrag node snapshot). For per-service control, deploy via docker compose
+    instead (see docker-compose.notes.md). Auto-returns after a reboot via
+    restart=unless-stopped.
+  </Overview>
+  <Category>Productivity: Tools: Network:Other</Category>
+
+  <!-- WebUI: the api-gateway HTTPS port. [IP] is filled by unraid. -->
+  <WebUI>https://[IP]:[PORT:8443]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/diyrag/diyrag/main/deploy/unraid/diyrag-icon.png</Icon>
+
+  <!-- Run mode: agent supervises the rest of the stack (§16b.1). -->
+  <PostArgs>--mode agent</PostArgs>
+
+  <!--
+    EXTRA PARAMETERS
+      restart=unless-stopped : returns after unraid reboot / array start (§16b.3)
+      GPU (optional): uncomment to pass scoped NVIDIA devices to the Rust-native
+      backend. Requires the unraid Nvidia Driver plugin. NEVER add --privileged.
+        --runtime=nvidia
+      (NVIDIA_VISIBLE_DEVICES / NVIDIA_DRIVER_CAPABILITIES are set as env vars
+       below so they show in the CA UI; prefer scoping to specific GPU UUIDs
+       over `all` for blast-radius control — §22 #14.)
+  -->
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <!-- GPU variant (uncomment to enable NVIDIA passthrough):
+  <ExtraParams>--restart=unless-stopped --runtime=nvidia</ExtraParams>
+  -->
+
+  <DonateText/>
+  <DonateLink/>
+  <Description>
+    diyRAG supervisor (agent mode) for unraid. Headless control via the diyrag
+    CLI; reboot-persistent via restart=unless-stopped; optional scoped NVIDIA
+    GPU passthrough. No --privileged; only the gateway (8443) and sync (7443)
+    ports are published.
+  </Description>
+
+  <!-- ====================== PORTS ====================== -->
+  <!-- api-gateway: WebUI / REST + WS (the only app port; §11, §12.8). -->
+  <Config Name="WebUI / API (api-gateway)" Target="8443" Default="8443" Mode="tcp"
+          Description="HTTPS REST + WebSocket gateway. The WebUI port. (§11)"
+          Type="Port" Display="always" Required="true" Mask="false">8443</Config>
+  <!-- sync-agent: mTLS gRPC to peer LAN nodes (§9). Only needed for multi-node. -->
+  <Config Name="LAN sync (sync-agent, mTLS gRPC)" Target="7443" Default="7443" Mode="tcp"
+          Description="tonic gRPC + mutual TLS to peer LAN nodes. Expose only if syncing across instances. (§9)"
+          Type="Port" Display="always" Required="false" Mask="false">7443</Config>
+
+  <!-- ====================== APPDATA VOLUMES ====================== -->
+  <!-- All under /mnt/user/appdata/diyrag (§16b.3). Container paths match the
+       compose named-volume mount points. -->
+  <Config Name="Postgres data" Target="/var/lib/postgresql/data"
+          Default="/mnt/user/appdata/diyrag/postgres"
+          Description="Authoritative metadata (Postgres 16). (§5.1)"
+          Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/diyrag/postgres</Config>
+  <Config Name="Qdrant data" Target="/qdrant/storage"
+          Default="/mnt/user/appdata/diyrag/qdrant"
+          Description="Vector store, per-tenant collections. (§5.2)"
+          Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/diyrag/qdrant</Config>
+  <Config Name="MinIO / blob store" Target="/data"
+          Default="/mnt/user/appdata/diyrag/minio"
+          Description="Content-addressed original bytes (retention). (§5.3)"
+          Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/diyrag/minio</Config>
+  <Config Name="Model cache" Target="/models"
+          Default="/mnt/user/appdata/diyrag/models"
+          Description="ONNX / mistral.rs model cache (BGE-M3, reranker, LLM). (§16)"
+          Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/diyrag/models</Config>
+  <Config Name="Certs (mTLS/PKI)" Target="/certs"
+          Default="/mnt/user/appdata/diyrag/certs"
+          Description="CA + service certs (rcgen). Read-only to the app. (§12.1)"
+          Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/diyrag/certs</Config>
+  <!-- Optional: a documents share to ingest (read-only is safest). -->
+  <Config Name="Documents to ingest (optional, RO)" Target="/data/documents"
+          Default="/mnt/user/Documents"
+          Description="Mount a share to ingest with `diyrag ingest /data/documents --watch`. Read-only recommended."
+          Type="Path" Display="always" Required="false" Mask="false" ReadOnly="true">/mnt/user/Documents</Config>
+
+  <!-- ====================== ENVIRONMENT ====================== -->
+  <!-- The single source of secrets is the env file; this references it so the
+       template carries NO secrets (§12.1, §19). diyragd also reads it. -->
+  <Config Name="ENV file path" Target="DIYRAG_ENV_FILE"
+          Default="/mnt/user/appdata/diyrag/config/.env"
+          Description="Path (inside the container) to the .env with real secrets. Copy from repo .env.example. NEVER commit it. (§12.1)"
+          Type="Variable" Display="always" Required="true" Mask="false">/mnt/user/appdata/diyrag/config/.env</Config>
+  <Config Name="DIYRAG_DATA_DIR" Target="DIYRAG_DATA_DIR" Default="/mnt/user/appdata/diyrag"
+          Description="Base data dir; subpaths derive from it. (§16b.3)"
+          Type="Variable" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/diyrag</Config>
+  <Config Name="DIYRAGD_MODE" Target="DIYRAGD_MODE" Default="agent"
+          Description="Supervisor mode: agent (orchestrate stack) | all-in-one | service:&lt;name&gt;. (§16b.1)"
+          Type="Variable" Display="advanced" Required="true" Mask="false">agent</Config>
+  <Config Name="RUST_LOG" Target="RUST_LOG" Default="info,diyrag=info"
+          Description="Log level/filter. (§13.1)"
+          Type="Variable" Display="advanced" Required="false" Mask="false">info,diyrag=info</Config>
+  <Config Name="DIYRAG_LOG_FORMAT" Target="DIYRAG_LOG_FORMAT" Default="json"
+          Description="json (observability) | pretty (local). (§13.1)"
+          Type="Variable" Display="advanced" Required="false" Mask="false">json</Config>
+
+  <!-- GPU env (only effective with --runtime=nvidia in Extra Parameters and the
+       unraid Nvidia Driver plugin). Scope to GPU UUIDs over `all` if possible
+       (§22 #14). -->
+  <Config Name="NVIDIA_VISIBLE_DEVICES (GPU)" Target="NVIDIA_VISIBLE_DEVICES" Default="all"
+          Description="Scope of GPUs exposed to the Rust-native backend. Prefer specific UUID(s) over 'all'. Needs --runtime=nvidia. (§16, §22 #14)"
+          Type="Variable" Display="advanced" Required="false" Mask="false">all</Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES (GPU)" Target="NVIDIA_DRIVER_CAPABILITIES" Default="compute,utility"
+          Description="Driver capabilities for the GPU. (§16)"
+          Type="Variable" Display="advanced" Required="false" Mask="false">compute,utility</Config>
+  <Config Name="ORT_EXECUTION_PROVIDER" Target="ORT_EXECUTION_PROVIDER" Default="cuda"
+          Description="ONNX Runtime EP for embeddings/reranker: cuda | cpu. (§16)"
+          Type="Variable" Display="advanced" Required="false" Mask="false">cuda</Config>
+
+  <!-- Placeholder secret vars: keep Mask=true. PREFER the ENV file above over
+       setting these in the UI; shown for parity with .env.example (§5.1). -->
+  <Config Name="POSTGRES_PASSWORD" Target="POSTGRES_PASSWORD" Default=""
+          Description="PLACEHOLDER. Prefer setting it in the .env file, not here. (§12.1)"
+          Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="MINIO_ROOT_PASSWORD" Target="MINIO_ROOT_PASSWORD" Default=""
+          Description="PLACEHOLDER. Prefer the .env file. (§12.1)"
+          Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="QDRANT_API_KEY" Target="QDRANT_API_KEY" Default=""
+          Description="PLACEHOLDER. Prefer the .env file. (§5.2, §12.1)"
+          Type="Variable" Display="advanced" Required="false" Mask="true"/>
+</Container>

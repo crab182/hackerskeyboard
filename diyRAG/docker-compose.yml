@@ -1,0 +1,317 @@
+# ============================================================================
+# diyRAG — base Docker Compose stack
+# ============================================================================
+# THIS IS THE PRIMARY DEPLOYMENT PATH FOR unraid / LINUX (MASTER_BUILD_SPEC.md
+# §16b.3, §17). On Windows the all-in-one `diyragd` Windows Service is used
+# instead (§16b.2). On unraid, the Docker Compose Manager plugin or the
+# terminal runs these files; `restart: unless-stopped` + unraid auto-starting
+# Docker on array start returns the stack after a reboot.
+#
+# Hardening (§12.8): non-root users, named volumes, an internal network, and
+# ONLY the api-gateway and sync-agent expose host ports. Secrets come from
+# `.env` placeholders here; production uses Docker secrets / SOPS (§12.1).
+#
+# Overlays:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d  # GPU
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up     # dev
+# ============================================================================
+
+name: diyrag
+
+x-rust-svc: &rust-svc
+  restart: unless-stopped
+  env_file: .env
+  user: "10001:10001" # non-root (§12.8)
+  networks: [diyrag-internal]
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+
+networks:
+  # Internal-only east-west network; nothing here is published except via the
+  # explicit `ports:` on api-gateway and sync-agent below.
+  diyrag-internal:
+    driver: bridge
+
+volumes:
+  pg-data:
+  qdrant-data:
+  minio-data:
+  nats-data:
+  redis-data:
+  model-cache:
+  certs:
+  caddy-data:
+  caddy-config:
+
+services:
+
+  # --------------------------------------------------------------------------
+  # Infrastructure
+  # --------------------------------------------------------------------------
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [diyrag-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    restart: unless-stopped
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks: [diyrag-internal]
+    healthcheck:
+      # Qdrant ships no curl; use its TCP readiness via the bundled binary.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  minio:
+    image: minio/minio:RELEASE.2024-11-07T00-52-20Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    networks: [diyrag-internal]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    command: ["-js", "-sd", "/data", "-m", "8222"] # JetStream + monitoring port
+    volumes:
+      - nats-data:/data # durable JetStream store
+    networks: [diyrag-internal]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://127.0.0.1:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks: [diyrag-internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  # --------------------------------------------------------------------------
+  # Edge: Caddy reverse proxy (auto-TLS / HTTP-2 / mTLS termination, §3.2)
+  # One of TWO services that publish host ports.
+  # --------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [diyrag-internal]
+    ports:
+      - "443:443" # public HTTPS entrypoint
+      - "80:80"   # ACME / redirect to HTTPS
+    security_opt:
+      - no-new-privileges:true
+
+  # --------------------------------------------------------------------------
+  # Rust services (§4). Build contexts under ./crates/<name>.
+  # --------------------------------------------------------------------------
+
+  api-gateway: # edge auth/Z, rate-limit, validate, route, WS/SSE (§11, §12.3)
+    <<: *rust-svc
+    build:
+      context: .
+      dockerfile: crates/api-gateway/Dockerfile
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes:
+      - certs:/certs:ro
+    ports:
+      - "8443:8443" # the only direct app port (Caddy fronts it); §12.8
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/api-gateway", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  core-api: # file mgmt, roots, batch + RAG orchestration (§6, §7)
+    <<: *rust-svc
+    build:
+      context: .
+      dockerfile: crates/core-api/Dockerfile
+    depends_on:
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    volumes:
+      - certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/core-api", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  retrieval: # hybrid search + rerank + context-condense (§7)
+    <<: *rust-svc
+    build:
+      context: .
+      dockerfile: crates/retrieval/Dockerfile
+    depends_on:
+      qdrant: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/retrieval", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ingestion-worker: # parse → chunk → embed-client → persist (§6)
+    <<: *rust-svc
+    build:
+      context: .
+      dockerfile: crates/ingestion-worker/Dockerfile
+    depends_on:
+      nats: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    # Scale horizontally on Linux via replicas (§6.2, §15). The autoscaler
+    # adjusts this between DIYRAGD_WORKER_MIN/MAX.
+    deploy:
+      replicas: 2
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/ingestion-worker", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  sync-agent: # mdns-sd discovery + version-vector CRDT + snapshot repl (§9)
+    <<: *rust-svc
+    build:
+      context: .
+      dockerfile: crates/sync-agent/Dockerfile
+    depends_on:
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+    volumes:
+      - certs:/certs:ro # mTLS material (§12.1)
+    ports:
+      - "7443:7443" # tonic gRPC + mTLS to peer LAN nodes (the 2nd exposed port)
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/sync-agent", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  mcp-server: # rmcp Streamable HTTP + stdio, same RBAC (§8)
+    <<: *rust-svc
+    build:
+      context: .
+      dockerfile: crates/mcp-server/Dockerfile
+    depends_on:
+      core-api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/mcp-server", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  autoscaler: # broker-queue-depth → worker replica/task controller (§15)
+    <<: *rust-svc
+    build:
+      context: .
+      dockerfile: crates/autoscaler/Dockerfile
+    depends_on:
+      nats: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/autoscaler", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  # --------------------------------------------------------------------------
+  # Python sidecars (§3.3) — the ONLY Python. GPU reservations live in the
+  # docker-compose.gpu.yml overlay; this base runs them CPU-only by default.
+  # --------------------------------------------------------------------------
+
+  gpu-runtime: # /embed /rerank /infer /ocr (BGE-M3, reranker, vLLM, Surya) §16
+    build:
+      context: .
+      dockerfile: services-py/gpu-runtime/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    user: "10002:10002"
+    networks: [diyrag-internal]
+    volumes:
+      - model-cache:/models
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,os;urllib.request.urlopen('http://127.0.0.1:50051/healthz')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    # CPU fallback profile by default; GPU added by the overlay (§16).
+    profiles: ["cpu", "gpu", "py-llm"]
+
+  parsing-service: # Docling + Surya/Marker hard parses over gRPC (§6.3)
+    build:
+      context: .
+      dockerfile: services-py/parsing-service/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    user: "10003:10003"
+    networks: [diyrag-internal]
+    volumes:
+      - model-cache:/models
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:50052/healthz')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    profiles: ["cpu", "gpu"]

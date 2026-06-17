@@ -1,0 +1,99 @@
+# diyRAG — task runner (https://github.com/casey/just)
+# Mirrors the Makefile so contributors can use either. See MASTER_BUILD_SPEC.md
+# §17 (deployment) and §20 (phases). Commands wrap docker compose / cargo / the
+# diyrag CLI. Run `just` (or `just --list`) to see all targets.
+
+set dotenv-load := true
+
+# Compose file stacking (base + GPU + dev overlays)
+compose      := "docker compose -f docker-compose.yml"
+compose_gpu  := "docker compose -f docker-compose.yml -f docker-compose.gpu.yml"
+compose_dev  := "docker compose -f docker-compose.yml -f docker-compose.dev.yml"
+
+# Default: show available recipes
+default:
+    @just --list
+
+# --- Stack lifecycle ---------------------------------------------------------
+
+# Bring up the base stack (Linux/unraid primary path, §16b.3)
+up:
+    {{compose}} up -d
+    @echo "Stack up. Gateway: https://localhost:8443  |  logs: just logs"
+
+# Bring up the GPU overlay (NVIDIA Container Toolkit, §16)
+up-gpu:
+    {{compose_gpu}} up -d
+
+# Tear the stack down (keeps named volumes; add `--volumes` to wipe data)
+down:
+    {{compose}} down
+
+# Tail logs for a service, e.g. `just logs core-api`
+logs service="":
+    {{compose}} logs -f {{service}}
+
+# Show stack status
+ps:
+    {{compose}} ps
+
+# --- Development -------------------------------------------------------------
+
+# Hot-reload dev stack (cargo-watch + exposed debug ports, docker-compose.dev.yml)
+dev:
+    {{compose_dev}} up
+
+# --- Quality gates (§18, §19) ------------------------------------------------
+
+# Run all tests: Rust workspace + Python sidecars
+test:
+    cargo test --workspace --all-features
+    cd services-py/gpu-runtime && python -m pytest -q
+    cd services-py/parsing-service && python -m pytest -q
+
+# Lint everything: rustfmt + clippy (deny warnings) + ruff for Python sidecars
+lint:
+    cargo fmt --all -- --check
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
+    ruff check services-py
+
+# Supply-chain checks (§12.9): licenses/advisories + vuln audit
+audit:
+    cargo deny check
+    cargo audit
+
+# --- Database / data ---------------------------------------------------------
+
+# Apply SQL migrations via sqlx (§5.1 / migrations/)
+migrate:
+    sqlx migrate run --source migrations
+
+# Seed first-run data: admin tenant/user + help-content store (§17 bootstrap)
+seed:
+    cargo run -p diyrag-cli -- seed --admin --help-content
+
+# First-run bootstrap: CA + service certs (rcgen), models, migrations, seed (§17)
+bootstrap:
+    cargo run -p diyrag-cli -- bootstrap --generate-ca --pull-models
+    just migrate
+    just seed
+
+# --- Backup / replication (§9, §17) -----------------------------------------
+
+# Take a Qdrant snapshot + Postgres dump (unit of vector replication, §9)
+snapshot:
+    cargo run -p diyrag-cli -- node snapshot --out ./snapshots
+
+# Restore from a snapshot directory
+restore dir="./snapshots":
+    cargo run -p diyrag-cli -- node restore --from {{dir}}
+
+# --- Service management (§16b) ----------------------------------------------
+
+# Install diyRAG as an OS service (Windows SCM auto-start / systemd / compose)
+svc-install:
+    cargo run -p diyrag-cli -- service install --mode all-in-one --auto-start
+
+# Query the OS service status
+svc-status:
+    cargo run -p diyrag-cli -- service status

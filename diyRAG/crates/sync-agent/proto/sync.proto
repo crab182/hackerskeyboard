@@ -1,0 +1,133 @@
+// diyRAG LAN sync gRPC contract (sketch) — MASTER_BUILD_SPEC.md §9.
+//
+// Two sync-agent peers act as BOTH client and server of this service over
+// HTTP/2 + mutual TLS (rustls). Peers are enrolled in the `nodes` table with a
+// `priority` and a pinned X.509 cert fingerprint; unknown certs are rejected at
+// the rustls verifier (§9 / §12.1). The transport carries only:
+//   * registry DIFFS against the last acknowledged manifest (never full
+//     re-uploads), bounded per-sync record count (§9 DoS protection),
+//   * Qdrant snapshot MANIFESTS + chunked snapshot bytes (per-collection),
+//   * content-addressed BLOB bytes fetched by sha256 on demand.
+//
+// Conflict resolution lives in `crdt.rs`: version-vector dominance, else a
+// deterministic tiebreak (highest node priority, then lexicographically smallest
+// node_id). There is NO wall-clock LWW (clock skew, §9 / §22 #4).
+
+syntax = "proto3";
+
+package diyrag.sync.v1;
+
+// Bidirectional LAN sync service. Implemented (server) and consumed (client) by
+// every sync-agent. mTLS identity = the peer's enrolled node.
+service SyncService {
+  // Liveness probe (mirrors the HTTP /healthz contract, §0).
+  rpc Health(HealthRequest) returns (HealthReply);
+
+  // Exchange a registry diff. The caller sends the records it holds that are
+  // newer-or-concurrent than the peer's last acknowledged manifest; the peer
+  // replies with the records the caller is missing. Both sides resolve via the
+  // version-vector CRDT and persist into `sync_state` (§5.1 / §9).
+  rpc ExchangeRegistryDiff(RegistryDiffRequest) returns (RegistryDiffReply);
+
+  // List the per-collection Qdrant snapshots the peer can offer for replication
+  // (§9 vector payload). The caller then pulls the ones it lacks.
+  rpc ListSnapshots(SnapshotListRequest) returns (SnapshotManifest);
+
+  // Stream a single Qdrant snapshot's bytes in bounded chunks (§9). Streaming
+  // keeps large snapshots off a single gRPC frame.
+  rpc FetchSnapshot(SnapshotFetchRequest) returns (stream SnapshotChunk);
+
+  // Fetch a content-addressed blob by sha256, streamed in bounded chunks
+  // (§5.3 / §9 "peers fetch missing blobs by hash on demand").
+  rpc FetchBlob(BlobFetchRequest) returns (stream BlobChunk);
+}
+
+// --- Health -----------------------------------------------------------------
+message HealthRequest {}
+message HealthReply {
+  bool ok = 1;
+  string node_id = 2; // self-identification for peer-table cross-checks
+}
+
+// --- Registry diff (version-vector CRDT, §9) --------------------------------
+
+// A `{node: counter}` version vector (spec §5.1 `VersionVector`).
+message VersionVectorPb {
+  // Keyed by node_id; counter is monotonic per origin node.
+  map<string, int64> entries = 1;
+}
+
+// One registry record keyed by content hash. Identity = `content_sha256`; most
+// "conflicts" are no-ops because writes are idempotent on the hash (§9).
+message RegistryRecordPb {
+  string record_key = 1;        // = documents/chunks registry key (§5.1 sync_state.record_key)
+  string tenant_id = 2;         // UUIDv7 string; tenant isolation preserved across sync
+  string content_sha256 = 3;    // identity + integrity
+  VersionVectorPb version_vector = 4;
+  string origin_node = 5;       // node_id that last authored this record
+  // Opaque serialized registry payload (document/chunk metadata, serde JSON).
+  // Treated as data, never instructions (§12.5).
+  bytes payload = 6;
+}
+
+message RegistryDiffRequest {
+  string from_node = 1;             // caller node_id (cross-checked vs. mTLS identity)
+  // The manifest the caller last acknowledged from this peer; the peer replies
+  // with diffs relative to it only (never a full dump, §9 DoS protection).
+  string last_acked_manifest_id = 2;
+  // Bounded: callers MUST cap this; servers reject oversized batches (§9).
+  repeated RegistryRecordPb records = 3;
+}
+
+message RegistryDiffReply {
+  string manifest_id = 1;           // new manifest id the caller should ack
+  repeated RegistryRecordPb records = 2;   // records the caller was missing
+  // Records the server rejected (e.g., over the per-sync bound) for caller retry.
+  uint32 truncated_count = 3;
+}
+
+// --- Snapshot manifest + fetch (§9 vector payload) --------------------------
+
+message SnapshotListRequest {
+  string from_node = 1;
+  // Optionally restrict to specific tenant collections (server still enforces
+  // that the caller's mTLS identity may read them).
+  repeated string collections = 2;
+}
+
+message SnapshotEntry {
+  string collection = 1;        // per-tenant Qdrant collection name `t_{slug}` (§5.2)
+  string snapshot_id = 2;
+  string snapshot_sha256 = 3;   // integrity check before apply
+  uint64 size_bytes = 4;
+  string embed_model = 5;       // detect embedding-model drift across nodes (§9 / §22 #11)
+}
+
+message SnapshotManifest {
+  string manifest_id = 1;
+  repeated SnapshotEntry entries = 2;
+}
+
+message SnapshotFetchRequest {
+  string collection = 1;
+  string snapshot_id = 2;
+}
+
+message SnapshotChunk {
+  bytes data = 1;
+  uint64 offset = 2;
+  bool last = 3;
+}
+
+// --- Content-addressed blob fetch (§5.3 / §9) -------------------------------
+
+message BlobFetchRequest {
+  // sha256 hex; the server derives the key `sha256/{first2}/{sha256}` (§5.3).
+  string content_sha256 = 1;
+}
+
+message BlobChunk {
+  bytes data = 1;
+  uint64 offset = 2;
+  bool last = 3;
+}

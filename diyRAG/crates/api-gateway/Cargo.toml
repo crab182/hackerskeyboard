@@ -1,0 +1,55 @@
+[package]
+name = "diyrag-api-gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "diyRAG edge gateway: TLS, authN/Z, rate-limit, schema-validate, CORS, correlation-id, route to core-api (MASTER_BUILD_SPEC.md §2, §11, §12.3)."
+publish = false
+
+[[bin]]
+name = "diyrag-api-gateway"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+# Shared library (config/logging/errors/auth/db/schemas/vector/blob) — §4.
+diyrag-common = { path = "../common" }
+
+tokio = { workspace = true }
+tokio-util = "0.7" # CancellationToken for cooperative shutdown (§16b)
+async-trait = { workspace = true }
+
+axum = { workspace = true }
+http = "1.1"
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# --- Rate limiting (§12.3). DECISION: pinned in this member crate, not the
+#     workspace root, because the root Cargo.toml is owned by another agent and
+#     this task must not edit files outside the three target crate dirs. The
+#     root defines `governor`; the gateway adds `tower_governor` (the Tower
+#     middleware wrapper) + `fred` (distributed Redis token buckets) here.
+#     Promote to [workspace.dependencies] in a follow-up once ownership allows. ---
+governor = { workspace = true }
+tower_governor = "0.4"
+fred = { version = "9.4", default-features = false, features = ["i-std"] } # Redis-backed distributed buckets (§12.3)
+
+reqwest = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+garde = { workspace = true }
+
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+tracing = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

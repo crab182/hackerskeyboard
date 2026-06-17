@@ -1,0 +1,25 @@
+# diyRAG parsing-service — pinned runtime dependencies (MASTER_BUILD_SPEC.md §3.2, §6.3, §19).
+# Mirrors [project.dependencies] in pyproject.toml for plain pip installs (Dockerfile).
+# pyproject.toml is the source of truth; keep in sync. Versions PINNED (§19).
+#
+# Docling/Surya/Marker pull torch transitively; on a GPU node install the CUDA
+# torch wheel first (see Dockerfile / §16). SECURITY: use torch >= 2.6.0
+# (fixes torch.load RCE GHSA-53q9-r3pm-6pq6):
+#   pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+# LibreOffice/Calibre are NOT here — the Rust worker spawns them (§3.2, §6.3).
+
+# --- serving + health surface ----------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-json-logger==3.2.1
+
+# --- gRPC ------------------------------------------------------------------
+grpcio==1.68.1
+grpcio-tools==1.68.1
+protobuf==5.29.2
+
+# --- document AI (hard parse) ----------------------------------------------
+docling==2.15.1
+surya-ocr==0.8.3
+marker-pdf==1.2.3

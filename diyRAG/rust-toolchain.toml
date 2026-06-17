@@ -1,0 +1,13 @@
+# diyRAG — pinned Rust toolchain (MASTER_BUILD_SPEC.md §19).
+# Pinning the channel keeps CI, the Windows MSI build, and the unraid image
+# builds reproducible. Bump deliberately, not implicitly.
+[toolchain]
+channel = "1.94.1"
+components = ["rustfmt", "clippy"]
+# Cross targets: Linux/unraid (musl static + glibc) and Windows Service host.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "x86_64-pc-windows-msvc",
+]
+profile = "minimal"

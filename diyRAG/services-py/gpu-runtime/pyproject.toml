@@ -1,0 +1,114 @@
+[project]
+name = "diyrag-gpu-runtime"
+version = "0.1.0"
+description = "diyRAG GPU runtime sidecar: BGE-M3 embeddings (dense+sparse), reranker, LLM generation, and OCR. The ONLY GPU-owning process in the platform."
+requires-python = ">=3.11"
+license = { text = "see repo LICENSE" }
+readme = "README.md"
+
+# ---------------------------------------------------------------------------
+# Dependency policy (MASTER_BUILD_SPEC.md §3, §16, §19)
+# ---------------------------------------------------------------------------
+# This service is SELECTED ONLY by the `py-llm` and OCR profiles (§17). On every
+# other node the Rust-native backend (`ort`/`fastembed` for embeddings+rerank,
+# `mistral.rs`/`candle` for the LLM) is the DEFAULT and no Python runs on the
+# hot path (§16, §24.1). Keep this surface small and swappable behind the
+# `/embed` `/rerank` `/infer` `/ocr` gRPC/HTTP contract.
+#
+# Versions are PINNED (§19). Bump deliberately; CUDA/cuDNN/torch must match the
+# base image (see Dockerfile). torch is installed from the CUDA wheel index.
+dependencies = [
+  # --- HTTP/serving layer -------------------------------------------------
+  "fastapi==0.115.6",
+  "uvicorn[standard]==0.34.0",
+  "pydantic==2.10.4",            # Pydantic v2 — request/response contracts (§3.2)
+  "python-json-logger==3.2.1",   # structured JSON logging (§13.1)
+
+  # --- gRPC (Rust ingestion-worker / core-api call this over gRPC) --------
+  "grpcio==1.68.1",
+  "grpcio-tools==1.68.1",
+  "protobuf==5.29.2",
+
+  # --- Deep-learning core (CUDA wheels; see [tool.diyrag] note) -----------
+  # torch is the GPU runtime; install the +cu124 wheel from the CUDA index in
+  # the Dockerfile. Pinned here for reproducibility on the py-llm profile.
+  # SECURITY: torch must be >= 2.6.0 — earlier versions carry a critical
+  # `torch.load(weights_only=True)` RCE (GHSA-53q9-r3pm-6pq6), and < 2.6.0 also
+  # re-enables the vLLM malicious-model RCE bypass CVE-2025-24357.
+  "torch==2.6.0",
+  "transformers==4.47.1",        # fallback for models lacking an ONNX export
+  "tokenizers==0.21.0",
+
+  # --- Embeddings + reranker (BGE-M3 dense+sparse, bge-reranker-v2-m3) -----
+  # FlagEmbedding ships the canonical BGE-M3 dense+sparse+colbert API; it pulls
+  # sentence-transformers transitively. Either may drive the /embed + /rerank
+  # contract.
+  "FlagEmbedding==1.3.3",
+  "sentence-transformers==3.3.1",
+
+  # --- Observability (§13.1) ----------------------------------------------
+  "opentelemetry-api==1.29.0",
+  "opentelemetry-sdk==1.29.0",
+  "opentelemetry-exporter-otlp==1.29.0",
+  "opentelemetry-instrumentation-fastapi==0.50b0",
+]
+
+[project.optional-dependencies]
+# vLLM is Linux/CUDA-only and is what makes the `py-llm` throughput profile
+# worth having (paged attention, continuous batching — §16). It is OPTIONAL:
+# the Rust-native `mistral.rs` backend is the cross-platform default (§24.1).
+#   pip install '.[vllm]'   # linux + cuda only
+vllm = [
+  # SECURITY: >= 0.22.0 clears the critical vLLM CVEs flagged on 0.6.6 —
+  # OpenAI auth bypass (GHSA-94f4-hr76-p5j6, patched 0.22.0), Mooncake/PyNcclPipe
+  # RCE (GHSA-x3m8-f7g5-qhm7, GHSA-hj4w-hm2g-p6w5, GHSA-hjq4-87xh-g4fv) and the
+  # GroupCoordinator.recv_object deserialization issue (GHSA-pgr7-mhp5-fgjp).
+  # vLLM resolves its own torch build; the base torch>=2.6.0 pin covers the
+  # transformers/OCR path.
+  "vllm==0.22.0",
+]
+
+# Document-AI OCR models (Surya / Marker). Pulled only when the OCR profile is
+# active. Heavy GPU OCR for scanned PDFs also lives in the parsing-service;
+# here it backs the /ocr contract for image/region OCR requested by retrieval.
+ocr = [
+  "surya-ocr==0.8.3",
+  "marker-pdf==1.2.3",
+]
+
+dev = [
+  "pytest==8.3.4",
+  "pytest-asyncio==0.25.0",
+  "httpx==0.28.1",               # FastAPI TestClient transport
+  "mypy==1.14.1",
+  "ruff==0.8.4",
+  "black==24.10.0",
+]
+
+[tool.diyrag]
+# Profile selection (§17): this service is brought up only under the `py-llm`
+# / `ocr` compose profiles. Elsewhere EMBED_BACKEND/RERANK_BACKEND/LLM_BACKEND
+# default to `rust-native`/`rust-llm` and this container is never started.
+profiles = ["py-llm", "ocr"]
+cuda_note = "torch 2.6.0 expects CUDA 12.4 runtime; install torch==2.6.0+cu124 from https://download.pytorch.org/whl/cu124 inside the CUDA base image."
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"

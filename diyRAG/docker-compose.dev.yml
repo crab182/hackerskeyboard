@@ -1,0 +1,119 @@
+# ============================================================================
+# diyRAG — development overlay (MASTER_BUILD_SPEC.md §17)
+# ============================================================================
+# Hot-reload + exposed debug ports for local development. Stack on top of base:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# This overlay deliberately RELAXES production hardening (read-only rootfs,
+# port exposure) for developer ergonomics. NEVER use it in production — the
+# base file is the hardened path (§12.8).
+#
+# Mechanism:
+#   * cargo-watch rebuilds & restarts each Rust service on source change.
+#   * the workspace source is bind-mounted so edits are picked up live.
+#   * a shared cargo target/registry cache speeds incremental rebuilds.
+#   * infra and debug ports are published to localhost.
+# ============================================================================
+
+name: diyrag
+
+x-rust-dev: &rust-dev
+  image: rust:1.94
+  working_dir: /workspace
+  read_only: false
+  user: "0:0" # root in dev for cargo cache writes; base file is non-root
+  volumes:
+    - .:/workspace
+    - cargo-registry:/usr/local/cargo/registry
+    - cargo-target:/workspace/target
+  environment:
+    CARGO_TERM_COLOR: always
+    RUST_BACKTRACE: "1"
+    RUST_LOG: debug
+
+volumes:
+  cargo-registry:
+  cargo-target:
+
+services:
+
+  # Infra: publish ports for local inspection (psql / Qdrant UI / MinIO / etc.)
+  postgres:
+    ports:
+      - "5432:5432"
+  qdrant:
+    ports:
+      - "6333:6333" # REST + web dashboard
+      - "6334:6334" # gRPC
+  minio:
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # console
+  nats:
+    ports:
+      - "4222:4222" # client
+      - "8222:8222" # monitoring
+  redis:
+    ports:
+      - "6379:6379"
+
+  # Rust services run under cargo-watch for hot reload + a published debug port.
+  api-gateway:
+    <<: *rust-dev
+    command: >
+      sh -c "cargo install cargo-watch --locked 2>/dev/null;
+             cargo watch -x 'run -p api-gateway'"
+    ports:
+      - "8443:8443"
+      - "9229:9229" # debug/attach
+
+  core-api:
+    <<: *rust-dev
+    command: >
+      sh -c "cargo install cargo-watch --locked 2>/dev/null;
+             cargo watch -x 'run -p core-api'"
+    ports:
+      - "9230:9229" # debug/attach
+
+  retrieval:
+    <<: *rust-dev
+    command: >
+      sh -c "cargo install cargo-watch --locked 2>/dev/null;
+             cargo watch -x 'run -p retrieval'"
+    ports:
+      - "9231:9229"
+
+  ingestion-worker:
+    <<: *rust-dev
+    command: >
+      sh -c "cargo install cargo-watch --locked 2>/dev/null;
+             cargo watch -x 'run -p ingestion-worker'"
+    # Single worker in dev for easier log reading.
+    deploy:
+      replicas: 1
+    ports:
+      - "9232:9229"
+
+  sync-agent:
+    <<: *rust-dev
+    command: >
+      sh -c "cargo install cargo-watch --locked 2>/dev/null;
+             cargo watch -x 'run -p sync-agent'"
+    ports:
+      - "7443:7443"
+      - "9233:9229"
+
+  mcp-server:
+    <<: *rust-dev
+    command: >
+      sh -c "cargo install cargo-watch --locked 2>/dev/null;
+             cargo watch -x 'run -p mcp-server'"
+    ports:
+      - "9234:9229"
+
+  autoscaler:
+    <<: *rust-dev
+    command: >
+      sh -c "cargo install cargo-watch --locked 2>/dev/null;
+             cargo watch -x 'run -p autoscaler'"

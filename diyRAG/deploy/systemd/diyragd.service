@@ -1,0 +1,82 @@
+# ============================================================================
+# diyRAG — systemd unit for generic Linux (non-unraid)
+# ============================================================================
+# MASTER_BUILD_SPEC.md §16b.3 ("Generic Linux ... a systemd unit, Restart=always,
+# WantedBy=multi-user.target ... runs `diyragd --mode all-in-one` natively;
+# `diyrag service install` wraps `systemctl enable --now`"), §14 (recovery),
+# §12.8 (hardening), acceptance #9.
+#
+# INSTALL (preferred):  diyrag service install        # wraps systemctl enable --now
+# INSTALL (manual):
+#   sudo cp deploy/systemd/diyragd.service /etc/systemd/system/diyragd.service
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin diyrag
+#   sudo install -d -o diyrag -g diyrag -m 0750 /var/lib/diyrag /etc/diyrag
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now diyragd          # enable = start on every boot
+#   systemctl status diyragd
+#
+# Secrets come from /etc/diyrag/diyrag.env (mode 0640, owned by diyrag) — NEVER
+# committed; placeholders in the repo .env.example (§12.1, §19).
+# ============================================================================
+
+[Unit]
+Description=diyRAG Retrieval-Augmented Generation supervisor (diyragd)
+Documentation=https://github.com/diyrag/diyrag
+# Order after the network and any local datastores it may depend on.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+
+# Run mode: all-in-one starts the Rust services + Rust-native inference in one
+# process (simplest single-box deployment, §16b.1).
+ExecStart=/usr/local/bin/diyragd --mode all-in-one
+
+# 12-factor config: typed defaults overridden by env. The env file holds real
+# secrets and is NOT in the repo (§12.1). `-` => missing file is non-fatal.
+EnvironmentFile=-/etc/diyrag/diyrag.env
+Environment=DIYRAG_DATA_DIR=/var/lib/diyrag
+Environment=DIYRAG_CONFIG_DIR=/etc/diyrag
+Environment=RUST_LOG=info,diyrag=info
+Environment=DIYRAG_LOG_FORMAT=json
+
+# --- Recovery (§14): always restart, with backoff + a start-rate limit so a
+#     crash-loop is bounded rather than hammering the box. ---
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Graceful stop: SIGTERM lets diyragd drain in-flight work units, ack/nak NATS,
+# and flush logs before the SIGKILL deadline (§16b.2 lifecycle parity).
+KillSignal=SIGTERM
+TimeoutStopSec=45
+
+# --- Identity (§12.8): dedicated low-privilege system account, never root. ---
+User=diyrag
+Group=diyrag
+
+# --- Sandboxing / hardening (§12.8). Tighten further per node as needed. ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+# The ONLY writable paths the service needs (state dir). /etc/diyrag stays RO.
+ReadWritePaths=/var/lib/diyrag
+# systemd creates/chowns the state dir on start (=> /var/lib/diyrag, 0750).
+StateDirectory=diyrag
+StateDirectoryMode=0750
+
+# Reasonable resource ceilings; raise for heavy ingestion nodes.
+LimitNOFILE=1048576
+
+[Install]
+# Start on every boot at the standard multi-user target (§16b.3).
+WantedBy=multi-user.target

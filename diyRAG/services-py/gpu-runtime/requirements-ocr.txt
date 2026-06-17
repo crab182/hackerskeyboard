@@ -1,0 +1,7 @@
+# gpu-runtime — OCR profile (Surya / Marker) (MASTER_BUILD_SPEC.md §6.3, §16).
+# Selected by the `ocr` compose profile; backs the /ocr region-OCR contract.
+# Whole scanned-PDF OCR also lives in the parsing-service. Install:
+#   pip install -r requirements.txt -r requirements-ocr.txt
+-r requirements.txt
+surya-ocr==0.8.3
+marker-pdf==1.2.3
