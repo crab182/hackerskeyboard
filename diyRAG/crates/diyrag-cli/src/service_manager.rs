@@ -17,7 +17,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::cli::{ManagerKind, ServiceConfig};
+use crate::cli::{ManagerKind, ManagerOverride, ServiceConfig};
 
 /// Lifecycle operations every backend supports (§16b.1).
 ///
@@ -53,10 +53,11 @@ pub trait ServiceManager {
     fn status(&self) -> Result<()>;
 }
 
-/// Choose the [`ServiceManager`] impl: explicit `--manager` override, else the
-/// platform default (`cfg!(windows)` ⇒ SCM, else systemd) (§16b.4).
-pub fn select(manager: Option<ManagerKind>) -> Result<Box<dyn ServiceManager>> {
-    let kind = manager.unwrap_or_else(default_manager_kind);
+/// Choose the [`ServiceManager`] impl from a CLI [`ManagerOverride`]: explicit
+/// `--manager`, else the platform default (`cfg!(windows)` ⇒ SCM, else systemd).
+/// The `--compose-file` value flows into the Docker backend (§16b.4).
+pub fn select(over: &ManagerOverride) -> Result<Box<dyn ServiceManager>> {
+    let kind = over.manager.unwrap_or_else(default_manager_kind);
     match kind {
         ManagerKind::Scm => {
             #[cfg(windows)]
@@ -82,7 +83,9 @@ pub fn select(manager: Option<ManagerKind>) -> Result<Box<dyn ServiceManager>> {
                 )
             }
         }
-        ManagerKind::Docker => Ok(Box::new(DockerCompose::new())),
+        ManagerKind::Docker => Ok(Box::new(
+            DockerCompose::new().with_compose_file(over.compose_file.clone()),
+        )),
     }
 }
 
@@ -132,6 +135,13 @@ impl WindowsScm {
             service_name: std::ffi::OsString::from(Self::SERVICE_NAME),
         }
     }
+}
+
+#[cfg(windows)]
+impl Default for WindowsScm {
+    fn default() -> Self {
+        Self::new()
+    }
 
     /// Open the SCM with the access level needed for an operation.
     fn open_manager(
@@ -173,7 +183,7 @@ impl ServiceManager for WindowsScm {
             // AutoStart => starts on every device restart / boot (§16b.2).
             start_type: ServiceStartType::AutoStart,
             error_control: ServiceErrorControl::Normal,
-            executable_path: cfg.binary_path.clone().into(),
+            executable_path: cfg.binary_path.clone(),
             launch_arguments: vec![
                 std::ffi::OsString::from("service"),
                 std::ffi::OsString::from("--mode"),
@@ -340,6 +350,13 @@ impl Systemd {
         Self {
             unit: Self::UNIT.to_string(),
         }
+    }
+}
+
+#[cfg(unix)]
+impl Default for Systemd {
+    fn default() -> Self {
+        Self::new()
     }
 
     /// Run `systemctl <args…>` and map a non-zero exit to an error.
@@ -514,7 +531,11 @@ mod tests {
 
     #[test]
     fn select_docker_works_on_any_platform() {
-        let mgr = select(Some(ManagerKind::Docker)).expect("docker manager selectable");
+        let over = ManagerOverride {
+            manager: Some(ManagerKind::Docker),
+            compose_file: "docker-compose.yml".to_string(),
+        };
+        let mgr = select(&over).expect("docker manager selectable");
         assert_eq!(mgr.name(), "docker-compose");
     }
 }

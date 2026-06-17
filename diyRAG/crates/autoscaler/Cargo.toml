@@ -1,0 +1,50 @@
+# diyRAG autoscaler (MASTER_BUILD_SPEC.md §15).
+#
+# A lightweight controller that polls NATS JetStream queue depth and scales the
+# `ingestion-worker` fleet — Docker Compose replicas on Linux/unraid, task count
+# on Windows — between min/max with hysteresis. Query subjects are kept ISOLATED
+# from ingest subjects so interactive queries are never starved by bulk ingestion
+# (§15 / §22 #7).
+[package]
+name = "diyrag-autoscaler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "diyRAG autoscaler: NATS JetStream queue-depth-driven ingestion-worker scaler (Docker Compose / Windows task count), with hysteresis (MASTER_BUILD_SPEC.md §15)."
+publish = false
+
+[[bin]]
+name = "diyrag-autoscaler"
+path = "src/main.rs"
+
+[lints.rust]
+# §19 / §12.8: no unsafe in service crates.
+unsafe_code = "forbid"
+
+[dependencies]
+# Shared library (config/logging/errors) — §4.
+# DECISION: depend via path per the scaffolding task instruction.
+diyrag-common = { path = "../common" }
+
+# --- Async runtime, traits (§3.2) ---
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "process", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] } # CancellationToken graceful drain (§16b.2)
+async-trait = { workspace = true }
+
+# --- Queue-depth source: NATS JetStream consumer/stream info (§15). ---
+async-nats = { workspace = true }
+
+# --- Serialization, time ---
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# --- Errors, config, logging (§14 / §19) ---
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

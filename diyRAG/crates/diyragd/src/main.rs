@@ -31,8 +31,6 @@ mod windows_service;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use crate::supervisor::RunMode;
-
 /// `diyragd` — supervisor daemon + native service host (spec §16b.1).
 #[derive(Debug, Parser)]
 #[command(
@@ -140,6 +138,7 @@ fn run_interactive(mode: String) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::supervisor::RunMode;
     use clap::CommandFactory;
 
     #[test]

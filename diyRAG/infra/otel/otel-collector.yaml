@@ -1,0 +1,97 @@
+# diyRAG — OpenTelemetry Collector config (MASTER_BUILD_SPEC.md §13).
+#
+# All services (Rust via tracing-opentelemetry / opentelemetry-otlp; the Python
+# sidecars via the OTel SDK) export OTLP to this collector, which fans out:
+#   * traces  -> Tempo
+#   * metrics -> Prometheus (scrape) / Prometheus remote-write
+#   * logs    -> Loki
+# Grafana then reads Tempo + Prometheus + Loki (§13.1, §13.3).
+#
+# NO secrets here. Endpoints are environment-substituted at start (the collector
+# expands ${ENV} when launched with --config and the env is set). Provide via
+# .env / Docker secrets (§17): TEMPO_ENDPOINT, LOKI_ENDPOINT,
+# PROMETHEUS_REMOTE_WRITE_ENDPOINT.
+
+receivers:
+  # OTLP is the single ingest protocol for traces, metrics, and logs (§13.1).
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        # mTLS for the collector ingress (east-west) — §12.1. Certs mounted
+        # read-only from the internal CA; NEVER baked into the image.
+        # tls:
+        #   ca_file: /run/secrets/diyrag-ca.crt
+        #   cert_file: /run/secrets/otel-collector.crt
+        #   key_file: /run/secrets/otel-collector.key
+        #   client_ca_file: /run/secrets/diyrag-ca.crt
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Bound memory so a telemetry spike never OOMs the collector.
+  memory_limiter:
+    check_interval: 2s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  # Batch for export efficiency.
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  # Tag every signal with deployment metadata for Grafana filtering.
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: ${env:DIYRAG_ENV}
+        action: upsert
+
+exporters:
+  # --- Traces -> Tempo (OTLP) ----------------------------------------------
+  otlp/tempo:
+    endpoint: ${env:TEMPO_ENDPOINT}
+    tls:
+      insecure: true # set false + ca_file in production (§12.1)
+
+  # --- Metrics -> Prometheus (pull) ----------------------------------------
+  # Prometheus scrapes the collector at :8889/metrics.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # --- Metrics -> Prometheus remote-write (push, optional) -----------------
+  prometheusremotewrite:
+    endpoint: ${env:PROMETHEUS_REMOTE_WRITE_ENDPOINT}
+    tls:
+      insecure: true
+
+  # --- Logs -> Loki (OTLP-native ingest) -----------------------------------
+  otlphttp/loki:
+    endpoint: ${env:LOKI_ENDPOINT}
+    tls:
+      insecure: true
+
+extensions:
+  # Liveness/readiness for the collector itself (§0 health convention).
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, prometheusremotewrite]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/loki]
+  telemetry:
+    logs:
+      level: info
+      encoding: json

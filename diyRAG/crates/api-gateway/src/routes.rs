@@ -56,9 +56,11 @@ impl IntoResponse for GatewayError {
 /// Build the versioned `/api/v1` router with the full middleware stack.
 ///
 /// Mounted under `/api/v1` by `main::build_app`. Each route declares its scope
-/// (spec §11.2) and proxies to the matching `core-api` path.
+/// (spec §11.2) and proxies to the matching `core-api` path. State is bound here
+/// (`.with_state`), so the returned router is stateless (`Router<()>`) and nests
+/// cleanly into the outer app.
 #[must_use]
-pub fn router(state: GatewayState) -> Router<GatewayState> {
+pub fn router(state: GatewayState) -> Router {
     // --- Read / query surface (scope: reader) ---
     let read_routes = Router::new()
         .route("/query/search", post(proxy_search))
@@ -167,8 +169,9 @@ async fn proxy_passthrough(
     Authenticated(ctx): Authenticated,
     correlation_id: CorrelationId,
     method: Method,
-    Path(_params): Path<std::collections::HashMap<String, String>>,
-    uri: axum::http::Uri,
+    // OriginalUri preserves the full `/api/v1/...` path (the bare `Uri` extractor
+    // would drop the `/api/v1` nest prefix), so we proxy the exact path upstream.
+    OriginalUri(uri): OriginalUri,
     body: axum::body::Bytes,
 ) -> Result<Response, GatewayError> {
     let path = uri.path().to_owned();

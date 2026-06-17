@@ -77,17 +77,9 @@ fn run_service(cmd: ServiceCommand) -> Result<()> {
     }
 }
 
-/// Select + configure the service manager from a [`ManagerOverride`].
+/// Select + configure the service manager from a [`ManagerOverride`] (§16b.4).
 fn build_manager(o: &ManagerOverride) -> Result<Box<dyn service_manager::ServiceManager>> {
-    let mgr = service_manager::select(o.manager)?;
-    // The Docker impl needs the compose-file path; `select` builds it with the
-    // default, so for the docker backend we rebuild with the override applied.
-    if mgr.name() == "docker-compose" {
-        return Ok(Box::new(
-            service_manager::DockerCompose::new().with_compose_file(o.compose_file.clone()),
-        ));
-    }
-    Ok(mgr)
+    service_manager::select(o)
 }
 
 /// Dispatch the `node …` subcommands to the REST client (§9).

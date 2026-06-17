@@ -1,0 +1,9 @@
+# Generated CA + leaf material (MASTER_BUILD_SPEC.md §12.1) — NEVER commit.
+# The repo-root .gitignore already ignores *.crt/*.key/*.pem here; this also
+# covers the OpenSSL serial file produced by gen-cert.sh.
+*.srl
+*.csr
+ca.crt
+*.crt
+*.key
+*.pem
