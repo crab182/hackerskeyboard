@@ -155,16 +155,25 @@ impl AppConfig {
     /// environment variables (prefix [`ENV_PREFIX`], `__` as the nesting separator)
     /// always win.
     pub fn load(defaults_toml: Option<&str>) -> Result<Self, AppError> {
-        // TODO: build the figment provider stack:
-        //   1. optional `Toml::file(defaults_toml)` for base values,
-        //   2. `Env::prefixed(ENV_PREFIX).split("__")` for overrides,
-        //   then `.extract::<AppConfig>()`. Map figment errors into
-        //   AppError::Config { .. }. Reference `defaults_toml` here so the
-        //   signature is honored once implemented.
-        let _ = defaults_toml;
-        Err(AppError::Config {
-            message: "AppConfig::load not yet implemented".to_owned(),
-        })
+        use figment::providers::{Env, Format, Toml};
+        use figment::Figment;
+
+        let mut figment = Figment::new();
+        // 1. Optional TOML base layer. A missing file is non-fatal — env may
+        //    supply every value (12-factor; spec §0). `Toml::file` is lenient
+        //    about absence by design.
+        if let Some(path) = defaults_toml {
+            figment = figment.merge(Toml::file(path));
+        }
+        // 2. Environment overrides ALWAYS win. `DIYRAG_HTTP__BIND_ADDR` maps to
+        //    `http.bind_addr` (prefix stripped, `__` is the nesting separator).
+        figment = figment.merge(Env::prefixed(ENV_PREFIX).split("__"));
+
+        figment
+            .extract::<AppConfig>()
+            .map_err(|e| AppError::Config {
+                message: e.to_string(),
+            })
     }
 
     /// Parse [`HttpConfig::bind_addr`] into a [`std::net::SocketAddr`].
@@ -199,4 +208,95 @@ fn default_log_filter() -> String {
 }
 fn default_true() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    // `figment::Jail::expect_with` requires the closure to return
+    // `Result<(), figment::Error>`; `figment::Error` is large, which trips
+    // `clippy::result_large_err` on the harness closures (test-only — it is
+    // figment's API surface, not ours).
+    #![allow(clippy::result_large_err)]
+
+    use super::*;
+
+    /// Set the minimum required (no-default) fields so `extract` succeeds.
+    fn set_required(jail: &mut figment::Jail) {
+        jail.set_env("DIYRAG_SERVICE_NAME", "api-gateway");
+        jail.set_env("DIYRAG_HTTP__BIND_ADDR", "127.0.0.1:8443");
+        jail.set_env("DIYRAG_DATABASE__URL", "postgres://u:p@db:5432/diyrag");
+        jail.set_env("DIYRAG_QDRANT__URL", "http://qdrant:6333");
+        jail.set_env("DIYRAG_BLOB__BACKEND", "local");
+        jail.set_env("DIYRAG_BLOB__BUCKET", "diyrag-blobs");
+        jail.set_env("DIYRAG_NATS__URL", "nats://nats:4222");
+        jail.set_env("DIYRAG_AUTH__JWT_ISSUER", "https://idp.lan/realms/diyrag");
+        jail.set_env("DIYRAG_AUTH__JWT_AUDIENCE", "diyrag-api");
+        jail.set_env("DIYRAG_AUTH__JWT_PUBLIC_KEY_PATH", "/etc/diyrag/jwt.pem");
+    }
+
+    #[test]
+    fn env_loads_with_serde_defaults_for_unset_fields() {
+        figment::Jail::expect_with(|jail| {
+            set_required(jail);
+            let cfg = AppConfig::load(None).expect("config should load from env");
+            assert_eq!(cfg.service_name, "api-gateway");
+            assert_eq!(cfg.http.bind_addr, "127.0.0.1:8443");
+            assert_eq!(cfg.database.url, "postgres://u:p@db:5432/diyrag");
+            // Defaults fill everything not provided:
+            assert_eq!(cfg.environment, "dev");
+            assert_eq!(cfg.database.max_connections, 16);
+            assert!(!cfg.database.run_migrations_on_start);
+            assert_eq!(cfg.qdrant.collection_prefix, "t_");
+            assert_eq!(cfg.nats.stream, "diyrag-ingest");
+            assert_eq!(cfg.http.max_body_bytes, 16 * 1024 * 1024);
+            assert!(cfg.observability.json_logs);
+            assert!(cfg.http.cors_allowed_origins.is_empty());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn env_overrides_win_over_defaults() {
+        figment::Jail::expect_with(|jail| {
+            set_required(jail);
+            jail.set_env("DIYRAG_ENVIRONMENT", "prod");
+            jail.set_env("DIYRAG_DATABASE__MAX_CONNECTIONS", "42");
+            jail.set_env("DIYRAG_DATABASE__RUN_MIGRATIONS_ON_START", "true");
+            jail.set_env("DIYRAG_OBSERVABILITY__JSON_LOGS", "false");
+            let cfg = AppConfig::load(None).unwrap();
+            assert_eq!(cfg.environment, "prod");
+            assert_eq!(cfg.database.max_connections, 42);
+            assert!(cfg.database.run_migrations_on_start);
+            assert!(!cfg.observability.json_logs);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn missing_required_field_is_a_config_error() {
+        figment::Jail::expect_with(|jail| {
+            // Only service_name present; the rest are absent → extract must fail,
+            // surfacing AppError::Config (never a panic).
+            jail.set_env("DIYRAG_SERVICE_NAME", "x");
+            let err = AppConfig::load(None).unwrap_err();
+            assert!(matches!(err, AppError::Config { .. }), "got {err:?}");
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn socket_addr_parses_then_rejects_garbage() {
+        figment::Jail::expect_with(|jail| {
+            set_required(jail);
+            let cfg = AppConfig::load(None).unwrap();
+            let sa = cfg.socket_addr().expect("valid bind_addr");
+            assert_eq!(sa.port(), 8443);
+            assert!(sa.ip().is_loopback());
+
+            jail.set_env("DIYRAG_HTTP__BIND_ADDR", "not-an-addr");
+            let bad = AppConfig::load(None).unwrap();
+            assert!(matches!(bad.socket_addr(), Err(AppError::Config { .. })));
+            Ok(())
+        });
+    }
 }
