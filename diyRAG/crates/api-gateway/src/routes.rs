@@ -12,11 +12,10 @@
 //! Route → scope mapping mirrors spec §11.2 exactly.
 
 use axum::body::Body;
-use axum::extract::{Path, State};
+use axum::extract::{OriginalUri, State};
 use axum::http::{HeaderValue, Method, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::routing::{delete, get, post};
-use axum::Json;
 use axum::Router;
 use diyrag_common::correlation::{CorrelationId, HEADER_NAME};
 use diyrag_common::errors::AppError;
@@ -24,34 +23,9 @@ use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::auth::{Authenticated, Requirement};
+use crate::error::GatewayError;
 use crate::ratelimit::{self, RatePolicy};
 use crate::GatewayState;
-
-/// Local handler error newtype.
-///
-/// [`diyrag_common::errors::AppError`] is a foreign type, so the orphan rule
-/// forbids `impl IntoResponse for AppError` in this crate. Handlers therefore
-/// return `Result<Response, GatewayError>`; `?` converts any `AppError` into
-/// this wrapper, and [`IntoResponse`] renders the standard envelope (spec §11.3).
-pub struct GatewayError(pub AppError);
-
-impl From<AppError> for GatewayError {
-    fn from(e: AppError) -> Self {
-        GatewayError(e)
-    }
-}
-
-impl IntoResponse for GatewayError {
-    fn into_response(self) -> Response {
-        let err = self.0;
-        let status =
-            StatusCode::from_u16(err.http_status()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        // TODO: write the error_log row (common/core-api) and use its log_id as
-        //       the reference_code so the GUI deep-link resolves (spec §10.4/§13.2).
-        let envelope = err.to_envelope("ERR-PENDING", CorrelationId::new());
-        (status, Json(envelope)).into_response()
-    }
-}
 
 /// Build the versioned `/api/v1` router with the full middleware stack.
 ///
@@ -59,7 +33,6 @@ impl IntoResponse for GatewayError {
 /// (spec §11.2) and proxies to the matching `core-api` path. State is bound here
 /// (`.with_state`), so the returned router is stateless (`Router<()>`) and nests
 /// cleanly into the outer app.
-#[must_use]
 pub fn router(state: GatewayState) -> Router {
     // --- Read / query surface (scope: reader) ---
     let read_routes = Router::new()
@@ -82,8 +55,14 @@ pub fn router(state: GatewayState) -> Router {
     let admin_routes = Router::new()
         .route("/files/roots/{id}", delete(proxy_passthrough))
         .route("/files/roots/{id}/reactivate", post(proxy_passthrough))
-        .route("/admin/keys", post(proxy_passthrough).delete(proxy_passthrough))
-        .route("/admin/nodes", post(proxy_passthrough).delete(proxy_passthrough))
+        .route(
+            "/admin/keys",
+            post(proxy_passthrough).delete(proxy_passthrough),
+        )
+        .route(
+            "/admin/nodes",
+            post(proxy_passthrough).delete(proxy_passthrough),
+        )
         .route("/admin/runtime", get(proxy_passthrough));
 
     Router::new()
@@ -105,7 +84,6 @@ pub fn router(state: GatewayState) -> Router {
 /// An empty allow-list yields a restrictive same-origin policy (deny-by-default,
 /// spec §12.5). Origins are validated; an invalid origin is skipped (it will
 /// simply not be allowed) rather than panicking.
-#[must_use]
 fn cors_layer(allowed_origins: &[String]) -> CorsLayer {
     let origins: Vec<HeaderValue> = allowed_origins
         .iter()
@@ -135,7 +113,14 @@ async fn proxy_search(
     Requirement::reader().enforce(&ctx)?;
     // TODO: garde-validate the deserialized SearchRequest before proxying
     //       (spec §11.1) — reject malformed/oversized queries here.
-    Ok(proxy(&state, Method::POST, "/api/v1/query/search", correlation_id, body).await?)
+    Ok(proxy(
+        &state,
+        Method::POST,
+        "/api/v1/query/search",
+        correlation_id,
+        body,
+    )
+    .await?)
 }
 
 /// `POST /query/answer` (scope: reader) — the expensive grounded-answer path.
@@ -157,7 +142,14 @@ async fn proxy_answer(
         }
         .into());
     }
-    Ok(proxy(&state, Method::POST, "/api/v1/query/answer", correlation_id, body).await?)
+    Ok(proxy(
+        &state,
+        Method::POST,
+        "/api/v1/query/answer",
+        correlation_id,
+        body,
+    )
+    .await?)
 }
 
 /// Generic authenticated pass-through proxy used by the remaining routes.
@@ -184,8 +176,8 @@ async fn proxy_passthrough(
 
 /// Map a `/api/v1` path to its required [`Requirement`] (spec §11.2).
 fn requirement_for(path: &str) -> Requirement {
-    if path.starts_with("/api/v1/admin")
-        || (path.starts_with("/api/v1/files/roots/")) // DELETE / reactivate are admin
+    if path.starts_with("/api/v1/admin") || (path.starts_with("/api/v1/files/roots/"))
+    // DELETE / reactivate are admin
     {
         Requirement::admin()
     } else if path.starts_with("/api/v1/files/roots")
@@ -234,8 +226,8 @@ async fn proxy(
             message: e.to_string(),
         })?;
 
-    let status = StatusCode::from_u16(upstream.status().as_u16())
-        .unwrap_or(StatusCode::BAD_GATEWAY);
+    let status =
+        StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let bytes = upstream.bytes().await.map_err(|e| AppError::Dependency {
         dependency: "core-api".to_owned(),
         message: e.to_string(),
@@ -244,8 +236,7 @@ async fn proxy(
     *response.status_mut() = status;
     response.headers_mut().insert(
         HEADER_NAME,
-        HeaderValue::from_str(&correlation_id.to_string())
-            .unwrap_or(HeaderValue::from_static("")),
+        HeaderValue::from_str(&correlation_id.to_string()).unwrap_or(HeaderValue::from_static("")),
     );
     Ok(response)
 }

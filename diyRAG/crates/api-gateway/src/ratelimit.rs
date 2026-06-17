@@ -56,7 +56,9 @@ impl RatePolicy {
 /// `X-Real-IP` when the gateway sits behind Caddy/Traefik (spec §3.2), falling
 /// back to the peer address. This is the coarse, always-on DoS guard.
 #[must_use]
-pub fn per_ip_layer(policy: RatePolicy) -> GovernorLayer<SmartIpKeyExtractor, governor::middleware::NoOpMiddleware> {
+pub fn per_ip_layer(
+    policy: RatePolicy,
+) -> GovernorLayer<SmartIpKeyExtractor, governor::middleware::NoOpMiddleware> {
     // `replenish_interval` is expressed as the period between single-token
     // refills; per_second tokens => 1_000_000 / per_second microseconds each.
     let micros = (1_000_000 / policy.per_second.max(1)).max(1);
@@ -123,12 +125,14 @@ impl PerKeyLimiter {
 /// atomic Lua token-bucket script keyed by `ratelimit:{scope}:{principal}`. The
 /// in-process [`PerKeyLimiter`] is a fast local pre-filter; this is the source
 /// of truth when more than one gateway instance is running.
+#[allow(dead_code)] // selected when a Redis URL is configured (multi-replica) — follow-up
 pub struct RedisRateLimiter {
     // TODO: hold a `fred::clients::RedisPool` and the configured policies. On
     //       check(), EVALSHA a token-bucket script returning allowed + retry-after.
     policy: RatePolicy,
 }
 
+#[allow(dead_code)] // see RedisRateLimiter — wired in the multi-replica follow-up
 impl RedisRateLimiter {
     /// Connect to Redis using the configured URL (sourced from config; no
     /// hardcoded host, spec §0).

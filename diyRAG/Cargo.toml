@@ -108,7 +108,13 @@ thiserror = "2.0"
 # --- Auth & rate limiting (§12.2 / §12.3) ---
 jsonwebtoken = "9.3"
 argon2 = "0.5"
-governor = "0.7"
+# governor 0.8 pairs with `tower_governor` 0.7 (the api-gateway's Tower wrapper),
+# which targets axum 0.8 and depends on governor 0.8. The scaffold's original
+# governor 0.7 + tower_governor 0.4 pairing was inconsistent: tower_governor 0.4
+# is axum-0.7-only and uses governor 0.6, so it put two incompatible governor
+# versions (and two axum-core versions) in the tree. 0.8 + 0.7 keeps a single
+# governor and a single axum.
+governor = "0.8"
 
 # --- HTTP client (gpu-runtime / parsing-service calls, blob fetch) ---
 reqwest = { version = "0.12", default-features = false, features = [
