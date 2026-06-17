@@ -7,10 +7,8 @@
 //! - [`config`]      — typed, env-driven configuration ([`config::AppConfig`]).
 //! - [`logging`]     — `tracing` JSON subscriber + correlation-id span layer.
 //! - [`correlation`] — the [`correlation::CorrelationId`] newtype + Axum extractor.
-//! - [`errors`]      — the [`errors::AppError`] enum, [`errors::Classification`],
-//!                     and the standard error envelope (spec §11.3).
-//! - [`auth`]        — API-key hashing/verification (argon2), JWT verify, scopes,
-//!                     domain scopes, and the RBAC [`auth::Role`] enum.
+//! - [`errors`]      — the [`errors::AppError`] enum, [`errors::Classification`], and the error envelope (§11.3).
+//! - [`auth`]        — API-key hashing/verification (argon2), JWT verify, scopes, domain scopes, RBAC [`auth::Role`].
 //! - [`db`]          — `sqlx` `PgPool` initialization + migration helper.
 //! - [`schemas`]     — `serde` + `sqlx::FromRow` structs for the §5.1 tables.
 //! - [`vector`]      — the [`vector::VectorStore`] trait + a Qdrant impl skeleton.
