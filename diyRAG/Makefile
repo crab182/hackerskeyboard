@@ -15,14 +15,20 @@ COMPOSE_DEV  := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 # Optional arg passthrough, e.g. `make logs SERVICE=core-api`
 SERVICE ?=
 DIR     ?= ./snapshots
+ARGS    ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help up up-gpu down logs ps dev test lint audit migrate seed bootstrap \
-        snapshot restore svc-install svc-status
+        bootstrap-env snapshot restore svc-install svc-status
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
+
+## --- Config / secrets -------------------------------------------------------
+
+bootstrap-env: ## Generate a local .env with strong secrets (gitignored; pass ARGS=--force)
+	bash scripts/gen-env.sh $(ARGS)
 
 ## --- Stack lifecycle --------------------------------------------------------
 
