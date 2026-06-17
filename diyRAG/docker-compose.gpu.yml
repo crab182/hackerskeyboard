@@ -1,0 +1,56 @@
+# ============================================================================
+# diyRAG — GPU overlay (MASTER_BUILD_SPEC.md §16)
+# ============================================================================
+# Stack with the base file to reserve NVIDIA GPUs for the Python inference and
+# parsing sidecars via the NVIDIA Container Toolkit:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# Requires the NVIDIA Container Toolkit on the host (on unraid: the Nvidia
+# Driver plugin). Hardening (§12.8 / §22 #14): GPUs are scoped — never
+# `--privileged`, never an unbounded device mount.
+#
+# Inference backend PROFILES (§16, §24.1):
+#   * py-llm  — vLLM (this overlay): high-throughput Linux/CUDA answer model.
+#               Select with `--profile py-llm` and set LLM_BACKEND=py-llm.
+#   * rust-llm — mistral.rs (Rust-native, DEFAULT; runs in the all-in-one
+#               `diyragd` process, NOT a container). Set LLM_BACKEND=rust-llm.
+#               No GPU overlay entry is needed for the Rust-native path because
+#               `ort`/`mistral.rs` claim the device in-process; on Windows this
+#               is the ONLY GPU path (vLLM is not targeted on Windows).
+# ============================================================================
+
+name: diyrag
+
+services:
+
+  gpu-runtime:
+    # Embeddings (BGE-M3), reranker, vLLM answer model, Surya/Marker OCR (§16).
+    environment:
+      # Scope the visible devices instead of `all` for blast-radius control.
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+      ORT_EXECUTION_PROVIDER: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    # Enable the vLLM answer-model profile alongside the always-on cpu profile.
+    profiles: ["gpu", "py-llm"]
+
+  parsing-service:
+    # Surya / Marker GPU OCR for scanned/complex documents (§6.3).
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    profiles: ["gpu"]

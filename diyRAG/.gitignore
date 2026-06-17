@@ -1,0 +1,100 @@
+# diyRAG — repository ignore rules.
+# Keep secrets, certs, build artifacts, and OS junk out of version control.
+# See MASTER_BUILD_SPEC.md §12.1 / §12.8 (no secrets or private keys in repo).
+
+# ---------------------------------------------------------------------------
+# Rust / Cargo
+# ---------------------------------------------------------------------------
+/target
+**/target
+# Cargo.lock IS committed for binaries/services (§19: pinned Cargo.lock).
+# Do NOT ignore it.
+*.rs.bk
+*.pdb
+
+# ---------------------------------------------------------------------------
+# Python sidecars (services-py/gpu-runtime, services-py/parsing-service)
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Node / web (web/, native/ frontends)
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+.vite/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# ---------------------------------------------------------------------------
+# Tauri 2 native shell (native/)
+# ---------------------------------------------------------------------------
+native/src-tauri/target/
+native/src-tauri/gen/
+*.app
+*.dmg
+*.msi
+*.exe
+*.AppImage
+
+# ---------------------------------------------------------------------------
+# Environment & local overrides (NEVER commit real values — use .env.example)
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.local
+
+# ---------------------------------------------------------------------------
+# Secrets / certificates / PKI (§12.1: keys never on disk in repo)
+# ---------------------------------------------------------------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+/infra/ca/*.crt
+/infra/ca/*.key
+/infra/ca/*.pem
+secrets/
+*.sops.yaml
+*.dec.yaml
+
+# ---------------------------------------------------------------------------
+# Model cache (ONNX / GGUF / HF weights — large, fetched at bootstrap §17)
+# ---------------------------------------------------------------------------
+model-cache/
+models/
+*.onnx
+*.gguf
+*.safetensors
+
+# ---------------------------------------------------------------------------
+# Local data volumes (when bind-mounted during dev)
+# ---------------------------------------------------------------------------
+data/
+appdata/
+*.sqlite
+*.sqlite3
+
+# ---------------------------------------------------------------------------
+# OS junk
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+.idea/
+.vscode/
+*.swp

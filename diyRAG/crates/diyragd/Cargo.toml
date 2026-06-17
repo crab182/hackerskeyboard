@@ -1,0 +1,64 @@
+# diyRAG supervisor daemon + Windows Service (MASTER_BUILD_SPEC.md §16b).
+#
+# `diyragd` is the single supervisor binary (spec §16b.1). It runs the Rust
+# services per run-mode and integrates with the host's service manager:
+#   * Windows  → Service Control Manager (auto-start on boot) via `windows-service`.
+#   * Linux    → systemd `Restart=always` / Docker entrypoint (SIGTERM/SIGINT).
+[package]
+name = "diyrag-diyragd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "diyRAG supervisor daemon: Windows Service (auto-start) + systemd/Docker entrypoint, run-mode orchestration (MASTER_BUILD_SPEC.md §16b)."
+publish = false
+
+# The binary the SCM / systemd / Docker entrypoint invokes is named `diyragd`,
+# matching the install scripts and `sc.exe binPath=` in spec §16b.2.
+[[bin]]
+name = "diyragd"
+path = "src/main.rs"
+
+[lints.rust]
+# §19 / §12.8: no unsafe in service crates. The `windows-service` crate owns the
+# FFI; we only use its safe `define_windows_service!` macro surface.
+unsafe_code = "forbid"
+
+[dependencies]
+# --- Async runtime, CLI, errors, logging (workspace-pinned, §3.2 / §19) ---
+tokio = { workspace = true }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+
+# --- Cooperative cancellation for graceful drain (§16b.2 lifecycle).
+#     DECISION: `tokio-util` is pinned in this member crate, not the workspace
+#     root, because the root Cargo.toml is owned by another agent and this task
+#     must not edit files outside the two target crate dirs. The ingestion-worker
+#     crate already pins the same version locally; promote to
+#     [workspace.dependencies] in a follow-up once ownership allows. ---
+tokio-util = { version = "0.7", features = ["rt"] } # CancellationToken (§16b.2)
+
+# --- Windows Service integration (§16b.2). Target-gated so the crate still
+#     builds on Linux/macOS for the systemd/Docker path. Versions inherited from
+#     [workspace.dependencies] (root already declares windows-service = "0.7",
+#     eventlog = "0.3"). ---
+[target.'cfg(windows)'.dependencies]
+windows-service = { workspace = true } # SCM dispatcher + control handler (0.7)
+eventlog = { workspace = true }        # Windows Event Log on start/stop (§16b.2)
+# `eventlog` 0.3 is a backend for the `log` facade; we emit Event Log lines via
+# `log::info!`. DECISION: pinned locally (windows-only) rather than at the
+# workspace root, which this task must not edit.
+log = "0.4"
+
+[target.'cfg(unix)'.dependencies]
+# SIGTERM/SIGINT handling for systemd `Restart=always` + Docker entrypoint.
+# `signal` is part of tokio "full" (workspace default), kept explicit for clarity.
+tokio = { workspace = true, features = ["signal"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
