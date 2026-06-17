@@ -35,6 +35,14 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 garde = { version = "0.20", features = ["derive", "serde"] }
 
+# --- Shared building blocks used by `common` (http extractors, config, hashing) ---
+http = "1.1"
+bytes = "1.7"
+futures = "0.3"
+hex = "0.4"
+rand = "0.8"
+figment = { version = "0.10", features = ["env", "toml"] }
+
 # --- Relational store (§3.2 / §5.1: PostgreSQL 16 via sqlx) ---
 # runtime-tokio-rustls keeps us OpenSSL-free (§12.1). uuid/chrono/json features
 # map UUIDv7 PKs, UTC timestamps, and JSONB columns to Rust types.
