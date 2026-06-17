@@ -75,10 +75,46 @@ where
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let raw = parts
-            .headers
-            .get(HEADER_NAME)
-            .and_then(|v| v.to_str().ok());
+        let raw = parts.headers.get(HEADER_NAME).and_then(|v| v.to_str().ok());
         Ok(Self::from_header_or_new(raw))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_header_and_falls_back_otherwise() {
+        let id = Uuid::now_v7();
+        assert_eq!(
+            CorrelationId::from_header_or_new(Some(&id.to_string())).0,
+            id
+        );
+
+        // Malformed or absent → a fresh v7 id (never a fixed/zero id).
+        let from_garbage = CorrelationId::from_header_or_new(Some("not-a-uuid"));
+        let from_none = CorrelationId::from_header_or_new(None);
+        assert_eq!(from_garbage.as_uuid().get_version_num(), 7);
+        assert_ne!(from_garbage.0, from_none.0, "two fresh mints must differ");
+    }
+
+    #[test]
+    fn header_value_is_trimmed() {
+        let id = Uuid::now_v7();
+        let padded = format!("  {id}\t");
+        assert_eq!(CorrelationId::from_header_or_new(Some(&padded)).0, id);
+    }
+
+    #[test]
+    fn display_and_serde_are_transparent_strings() {
+        let id = Uuid::now_v7();
+        let c = CorrelationId(id);
+        assert_eq!(c.to_string(), id.to_string());
+
+        let json = serde_json::to_string(&c).expect("serialize");
+        assert_eq!(json, format!("\"{id}\""));
+        let back: CorrelationId = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, c);
     }
 }

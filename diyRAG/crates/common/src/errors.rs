@@ -48,10 +48,7 @@ pub enum AppError {
 
     /// A downstream dependency (db/qdrant/blob/nats/gpu) failed transiently.
     #[error("dependency `{dependency}` unavailable: {message}")]
-    Dependency {
-        dependency: String,
-        message: String,
-    },
+    Dependency { dependency: String, message: String },
 
     /// Database access error.
     #[error("database error: {0}")]
@@ -114,13 +111,24 @@ impl AppError {
     #[must_use]
     pub fn user_facing_message(&self) -> String {
         match self {
-            AppError::Unauthorized { .. } => "Authentication is required or your credentials are invalid.".to_owned(),
-            AppError::Forbidden { .. } => "Access denied. You do not have permission to perform this action.".to_owned(),
-            AppError::Validation { .. } => "The request could not be processed because it was malformed.".to_owned(),
-            AppError::NotFound { resource } => format!("The requested {resource} could not be found."),
+            AppError::Unauthorized { .. } => {
+                "Authentication is required or your credentials are invalid.".to_owned()
+            }
+            AppError::Forbidden { .. } => {
+                "Access denied. You do not have permission to perform this action.".to_owned()
+            }
+            AppError::Validation { .. } => {
+                "The request could not be processed because it was malformed.".to_owned()
+            }
+            AppError::NotFound { resource } => {
+                format!("The requested {resource} could not be found.")
+            }
             AppError::Unprocessable { .. } => "This content could not be processed.".to_owned(),
-            AppError::Dependency { .. } => "A backend service is temporarily unavailable. Please try again shortly.".to_owned(),
-            _ => "An unexpected error occurred. The reference code can help support investigate.".to_owned(),
+            AppError::Dependency { .. } => {
+                "A backend service is temporarily unavailable. Please try again shortly.".to_owned()
+            }
+            _ => "An unexpected error occurred. The reference code can help support investigate."
+                .to_owned(),
         }
     }
 
@@ -181,4 +189,138 @@ fn is_transient_db_error(err: &sqlx::Error) -> bool {
         err,
         sqlx::Error::PoolTimedOut | sqlx::Error::PoolClosed | sqlx::Error::Io(_)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classification_transient_vs_permanent() {
+        // Dependency outages + pool timeouts are retryable (§14).
+        assert_eq!(
+            AppError::Dependency {
+                dependency: "qdrant".into(),
+                message: "connection refused".into(),
+            }
+            .classification(),
+            Classification::Transient,
+        );
+        assert_eq!(
+            AppError::Database(sqlx::Error::PoolTimedOut).classification(),
+            Classification::Transient,
+        );
+        // Logic/validation failures are permanent → quarantine, never retried.
+        for e in [
+            AppError::Validation {
+                message: "bad".into(),
+            },
+            AppError::Forbidden {
+                message: "no scope".into(),
+            },
+            AppError::Unprocessable {
+                message: "corrupt".into(),
+            },
+            AppError::Config {
+                message: "missing".into(),
+            },
+        ] {
+            assert_eq!(e.classification(), Classification::Permanent, "{e}");
+        }
+    }
+
+    #[test]
+    fn error_id_and_http_status_are_stable() {
+        let cases = [
+            (
+                AppError::Unauthorized {
+                    message: "x".into(),
+                },
+                "E401_UNAUTHORIZED",
+                401u16,
+            ),
+            (
+                AppError::Forbidden {
+                    message: "x".into(),
+                },
+                "E403_USER_PERMS",
+                403,
+            ),
+            (
+                AppError::Validation {
+                    message: "x".into(),
+                },
+                "E422_VALIDATION",
+                422,
+            ),
+            (
+                AppError::NotFound {
+                    resource: "document".into(),
+                },
+                "E404_NOT_FOUND",
+                404,
+            ),
+            (
+                AppError::Dependency {
+                    dependency: "db".into(),
+                    message: "x".into(),
+                },
+                "E503_DEPENDENCY",
+                503,
+            ),
+            (
+                AppError::Internal {
+                    message: "x".into(),
+                },
+                "E500_INTERNAL",
+                500,
+            ),
+        ];
+        for (e, id, status) in cases {
+            assert_eq!(e.error_id(), id, "error_id for {e}");
+            assert_eq!(e.http_status(), status, "http_status for {e}");
+        }
+    }
+
+    #[test]
+    fn user_facing_message_never_leaks_internals() {
+        let e = AppError::Internal {
+            message: "panic at 0xdeadbeef in secret_module".into(),
+        };
+        let msg = e.user_facing_message();
+        assert!(!msg.contains("0xdeadbeef"));
+        assert!(!msg.contains("secret_module"));
+    }
+
+    #[test]
+    fn envelope_matches_spec_11_3_shape() {
+        let e = AppError::Forbidden {
+            message: "missing scope write:role".into(),
+        };
+        let env = e.to_envelope("ERR-2026-ABC", CorrelationId::new());
+
+        assert!(!env.success);
+        assert_eq!(env.error_id, "E403_USER_PERMS");
+        assert_eq!(env.reference_code, "ERR-2026-ABC");
+        assert!(env.suggestion_link.contains("ERR-2026-ABC"));
+        // Admin-only technical detail carries the cause; user message stays generic.
+        assert!(env.technical_details.contains("missing scope write:role"));
+        assert!(!env.user_facing_message.contains("write:role"));
+
+        // Exact field names from spec §11.3 must be present in the JSON.
+        let json = serde_json::to_value(&env).expect("serialize envelope");
+        for key in [
+            "success",
+            "error_id",
+            "user_facing_message",
+            "technical_details",
+            "reference_code",
+            "correlation_id",
+            "timestamp",
+            "suggestion_link",
+        ] {
+            assert!(json.get(key).is_some(), "envelope missing field `{key}`");
+        }
+        assert_eq!(json["success"], serde_json::json!(false));
+    }
 }
