@@ -86,8 +86,16 @@ notify = "7.0"
 globset = "0.4"
 
 # --- Tokenization & Rust-native inference (§3.2 / §16: tokenizers + ort) ---
+# ort uses `load-dynamic` (NOT download-binaries): no build-time binary fetch
+# and no ureq/native-tls/OpenSSL — honors rustls-everywhere (§12.1) and the
+# local/LAN-only + offline default. The node provides libonnxruntime at runtime
+# via ORT_DYLIB_PATH (vendored into the image / model-cache). See ADR-0008.
 tokenizers = "0.21"
-ort = { version = "2.0.0-rc.9", features = ["cuda", "directml"] }
+ort = { version = "2.0.0-rc.9", default-features = false, features = [
+    "load-dynamic",
+    "cuda",
+    "directml",
+] }
 
 # --- CLI (§16b: diyrag CLI via clap) ---
 clap = { version = "4.5", features = ["derive", "env"] }

@@ -35,3 +35,4 @@ Options we rejected and why.
 | [0005](./0005-version-vector-crdt-no-lww.md) | Version-vector CRDT, no wall-clock LWW | Accepted |
 | [0006](./0006-per-tenant-qdrant-collections.md) | Per-tenant Qdrant collections | Accepted |
 | [0007](./0007-socket-security-triage.md) | Socket Security triage (CVE bumps + obfuscated-code false positives) | Accepted |
+| [0008](./0008-ort-load-dynamic-no-openssl.md) | ort load-dynamic — no OpenSSL, no build-time download | Accepted |
