@@ -54,8 +54,9 @@ impl Default for MarkupParser {
 impl Parser for MarkupParser {
     fn can_handle(&self, sniff: &MimeSniff) -> Confidence {
         match sniff.sniffed_mime.as_deref() {
-            Some("text/html") | Some("text/plain") | Some("application/rtf")
-            | Some("text/rtf") => Confidence::Yes,
+            Some("text/html") | Some("text/plain") | Some("application/rtf") | Some("text/rtf") => {
+                Confidence::Yes
+            }
             _ => match sniff.extension.as_deref() {
                 Some("html") | Some("htm") | Some("md") | Some("markdown") | Some("txt")
                 | Some("rtf") => Confidence::Maybe,
@@ -71,7 +72,9 @@ impl Parser for MarkupParser {
         //   txt  → paragraph split.
         //   rtf  → strip control words to plaintext.
         // Then run `Self::sanitize_text` over every block's text (§12.5).
-        Err(ParseError::Permanent("markup parsing not yet implemented".into()))
+        Err(ParseError::Permanent(
+            "markup parsing not yet implemented".into(),
+        ))
     }
 }
 

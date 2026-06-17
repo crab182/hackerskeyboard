@@ -16,8 +16,8 @@
 #   * rust-llm — mistral.rs (Rust-native, DEFAULT; runs in the all-in-one
 #               `diyragd` process, NOT a container). Set LLM_BACKEND=rust-llm.
 #               No GPU overlay entry is needed for the Rust-native path because
-#               `ort`/`mistral.rs` claim the device in-process; on Windows this
-#               is the ONLY GPU path (vLLM is not targeted on Windows).
+#               `candle`/`mistral.rs` claim the device in-process; on Windows
+#               this is the ONLY GPU path (vLLM is not targeted on Windows).
 # ============================================================================
 
 name: diyrag
@@ -30,7 +30,7 @@ services:
       # Scope the visible devices instead of `all` for blast-radius control.
       NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
       NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
-      ORT_EXECUTION_PROVIDER: cuda
+      DIYRAG_CANDLE_DEVICE: cuda
     deploy:
       resources:
         reservations:

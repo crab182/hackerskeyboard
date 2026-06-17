@@ -40,6 +40,8 @@ impl Parser for EpubParser {
         // TODO: epub::doc::EpubDoc::from_reader(Cursor::new(bytes)); iterate the
         //       spine in order, parse each XHTML resource, reuse
         //       MarkupParser::sanitize_text, emit Blocks with chapter headings.
-        Err(ParseError::Permanent("epub parsing not yet implemented".into()))
+        Err(ParseError::Permanent(
+            "epub parsing not yet implemented".into(),
+        ))
     }
 }

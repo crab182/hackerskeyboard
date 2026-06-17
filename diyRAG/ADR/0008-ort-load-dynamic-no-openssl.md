@@ -1,6 +1,15 @@
 # ADR-0008: ort `load-dynamic` — no OpenSSL, no build-time download
-- Status: Accepted
+- Status: **Superseded by [ADR-0009](./0009-candle-replaces-ort.md)** (2026-06-17)
 - Date: 2026-06-17
+
+> **Superseded.** The Rust-native embed/rerank path no longer uses `ort` at all.
+> `ort 2.0.0-rc.x` proved unstable (a VitisAI EP compile break surfaced even with
+> `cuda`/`directml` dropped), so the project switched to **candle** (HuggingFace's
+> pure-Rust ML framework). candle needs no ONNX Runtime, no `libonnxruntime`, and
+> no `ORT_DYLIB_PATH` — it is OpenSSL-free and offline-capable by construction,
+> which preserves the goals this ADR set out to protect. The decision and its
+> trade-offs (notably: no DirectML) are recorded in ADR-0009. The text below is
+> retained for history.
 
 ## Context
 The Rust-native inference path (ADR-0004) uses `ort` (ONNX Runtime bindings) for BGE-M3 embeddings and the bge-reranker cross-encoder in `retrieval` and `ingestion-worker`. With its default features, `ort` enables `download-binaries`, which fetches a prebuilt ONNX Runtime over the network at build time using `ureq` → `native-tls` → **OpenSSL**.

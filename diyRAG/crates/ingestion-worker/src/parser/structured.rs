@@ -38,6 +38,8 @@ impl Parser for StructuredParser {
         //       text Blocks (path: value), bounded depth (§12.4).
         //       eml → mail_parser::MessageParser; emit header Block + body Block;
         //       recurse attachments through the router (sanitize each, §12.5).
-        Err(ParseError::Permanent("structured parsing not yet implemented".into()))
+        Err(ParseError::Permanent(
+            "structured parsing not yet implemented".into(),
+        ))
     }
 }

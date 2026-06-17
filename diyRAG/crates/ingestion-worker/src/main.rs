@@ -82,11 +82,39 @@ pub struct WorkerState {
 
 impl WorkerState {
     /// Placeholder wiring so the skeleton compiles before `common` lands.
+    ///
+    /// The embedding backend defaults to the in-proc candle BGE-M3 backend
+    /// (Python-free common path; spec §16/§21). Its model directory is read from
+    /// `DIYRAG_EMBED_MODEL_DIR` as a stopgap until the key is promoted into config.
+    /// When unset (or a load fails) the worker still boots with an *unloaded*
+    /// backend that surfaces a clear error if embedding is attempted — keeping
+    /// nodes bootable offline / LAN-only without a model present.
     fn placeholder() -> Self {
+        let embedder: Box<dyn embed::EmbeddingBackend> = match std::env::var(
+            "DIYRAG_EMBED_MODEL_DIR",
+        ) {
+            Ok(dir) if !dir.trim().is_empty() => {
+                match embed::CandleEmbeddingBackend::load(
+                    std::path::Path::new(&dir),
+                    embed::DEFAULT_EMBED_MODEL_ID,
+                ) {
+                    Ok(backend) => Box::new(backend),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "embed model dir failed to load; starting unloaded");
+                        Box::new(embed::CandleEmbeddingBackend::new(
+                            embed::DEFAULT_EMBED_MODEL_ID,
+                        ))
+                    }
+                }
+            }
+            _ => Box::new(embed::CandleEmbeddingBackend::new(
+                embed::DEFAULT_EMBED_MODEL_ID,
+            )),
+        };
         Self {
             router: parser::ParserRouter::with_defaults(),
             chunker: chunker::Chunker::default(),
-            embedder: Box::new(embed::NoopEmbeddingBackend),
+            embedder,
         }
     }
 

@@ -135,8 +135,8 @@ The single biggest change from v1.0: **the service tier is Rust, not Python.** P
 | Relational/metadata | PostgreSQL 16 | **PostgreSQL 16 via `sqlx`** (async, compile-time-checked queries) | unchanged DB; `sqlx::query!` checks SQL against the schema at build time. | `sea-orm` if you want an ORM. |
 | Migrations | alembic/sqitch | **`sqlx migrate` (SQL files)** + optional `refinery` | SQL-first, in-repo, reviewable. | — |
 | Blob/object store | MinIO/FS | **`object_store` crate** (S3/MinIO/Azure/GCS/local FS) | one abstraction, swap backend by config; content-addressed retention. | `aws-sdk-s3` / `rust-s3` if S3-only. |
-| Embeddings | BGE-M3 (PyTorch) | **Rust-native: `ort` (ONNX Runtime) / `fastembed`** for BGE-M3 dense+sparse | runs on Windows **and** Linux; CUDA/DirectML/CoreML via ORT execution providers; no Python on the hot path. | **Python `gpu-runtime`** (transformers) when a model has no ONNX export. |
-| Reranker | bge-reranker-v2-m3 | **ONNX cross-encoder via `ort`** | in-process rerank; Rust. | Python fallback in `gpu-runtime`. |
+| Embeddings | BGE-M3 (PyTorch) | **Rust-native: `candle`** (XLM-RoBERTa, pure Rust) for BGE-M3 **dense** | runs on Windows, Linux **and** macOS; CPU default, CUDA/Metal via candle cargo features; no Python and no ONNX Runtime on the hot path (ADR-0009). | **Python `gpu-runtime`** (transformers) for BGE-M3 **sparse** (no candle head) and DirectML/other GPUs. |
+| Reranker | bge-reranker-v2-m3 | **candle cross-encoder** (XLM-RoBERTa sequence-classifier, pure Rust) | in-process rerank; Rust, no ONNX Runtime (ADR-0009). | Python fallback in `gpu-runtime`. |
 | LLM inference | vLLM | **`mistral.rs`** (Rust, candle-based, OpenAI-compatible server) as default; **vLLM (Python)** for high-throughput Linux/CUDA | `mistral.rs`/`candle` run on Windows+Linux+Mac; vLLM stays the throughput king on Linux/CUDA and is selectable by profile. | `llama.cpp` server for low-VRAM/CPU/Apple. |
 | Doc parsing (digital/clean) | Docling/PyMuPDF | **Rust-native router**: `lopdf`+`pdf-extract` (PDF text), `calamine` (xlsx/xls), `docx-rs`+`zip`+`quick-xml` (docx/pptx), `epub` (epub), `scraper`+`readability` (html), `csv`, `pulldown-cmark` (md), `mail-parser` (eml) | zero-Python path for the common, well-formed case. | — |
 | Doc parsing (scanned/complex/layout) | Surya/Marker/Docling | **Python `parsing-service`**: Docling (layout+tables), Surya/Marker (GPU OCR) over gRPC | deep-learning document AI has no Rust peer; isolate it behind an interface. | `ocrs`/`tesseract` (Rust) for simple OCR. |
@@ -164,7 +164,7 @@ The single biggest change from v1.0: **the service tier is Rust, not Python.** P
 
 ### 3.3 The Rust ⇄ Python boundary (precise)
 Python exists in exactly **two** deployable services, each behind a stable gRPC/HTTP interface so it is swappable:
-1. **`gpu-runtime`** (Python) — owns GPU(s); endpoints `/embed`, `/rerank`, `/infer`, `/ocr`. Default models: BGE-M3 (dense+sparse), bge-reranker-v2-m3, the answer LLM via vLLM, Surya/Marker for OCR. **Rust-native equivalents exist** (`ort`/`fastembed` for embeddings+rerank, `mistral.rs` for the LLM) and are the default on Windows / CPU / low-VRAM nodes; vLLM/transformers is selected on Linux/CUDA throughput nodes by profile.
+1. **`gpu-runtime`** (Python) — owns GPU(s); endpoints `/embed`, `/rerank`, `/infer`, `/ocr`. Default models: BGE-M3 (dense+sparse), bge-reranker-v2-m3, the answer LLM via vLLM, Surya/Marker for OCR. **Rust-native equivalents exist** (`candle` for dense embeddings + reranker, `mistral.rs` for the LLM) and are the default on Windows / CPU / low-VRAM nodes; vLLM/transformers is selected on Linux/CUDA throughput nodes by profile, and also supplies BGE-M3 **sparse** vectors (no candle head; ADR-0009).
 2. **`parsing-service`** (Python) — Docling + Surya/Marker for scanned/complex/layout-heavy documents. The Rust `ingestion-worker` calls it only when the Rust-native parser router decides a document is "hard" (low text density, OCR needed, complex tables). LibreOffice/Calibre conversions are spawned as child processes **by Rust**, not by Python.
 
 Everything else — gateway, core API, retrieval, ingestion orchestration + native parsing + chunking, sync, MCP, autoscaler, daemon/service, CLI, native shell — is **Rust**.
@@ -305,7 +305,7 @@ New formats = drop in a struct implementing `Parser` and register it — **no co
 - Carry mandatory metadata (§5.4). Reject chunks that fail invariants (empty text, > hard max tokens, missing required metadata) to the quarantine path.
 
 ### 6.5 Embedding (parallel + GPU-batched)
-- The embed step calls the embedding backend (`ort`/`fastembed` in-process **or** `gpu-runtime` `/embed`) with **dynamically sized batches** (grow to VRAM limit; target batch ≥ 32). Produce **both** dense and sparse vectors (BGE-M3). Persist atomically: chunk row (Postgres via `sqlx` transaction) + point (Qdrant) in a write retried as a unit, idempotent on `vector_id`.
+- The embed step calls the embedding backend (`candle` in-process **or** `gpu-runtime` `/embed`) with **dynamically sized batches** (grow to VRAM limit; target batch ≥ 32). Produce BGE-M3 vectors: the in-proc candle backend yields **dense** (CLS-pooled, L2-normalized XLM-RoBERTa); the **sparse** signal comes from `gpu-runtime` (no candle sparse head; ADR-0009). Persist atomically: chunk row (Postgres via `sqlx` transaction) + point (Qdrant) in a write retried as a unit, idempotent on `vector_id`.
 - Quantization (INT8/scalar) at the store; optional model quantization for low-VRAM nodes (§16).
 
 ### 6.6 Retention & logical delete (the "keep contents" guarantee)
@@ -321,7 +321,7 @@ On `DELETE /roots/{id}`: set `roots.is_active=false`; async job sets `documents.
 
 ### 7.1 Hybrid retrieval
 - Query embedding (BGE-M3 dense+sparse) → Qdrant **hybrid search** (`qdrant-client` `query` API) with server-side fusion (RRF or weighted) over the tenant collection, filtered to `retention_status=ACTIVE` and any caller-supplied `root_id`/domain filters.
-- Retrieve top-`k₀` (e.g., 40) → **rerank** with `bge-reranker-v2-m3` (ONNX via `ort`, or `gpu-runtime`) → keep top-`k` (8–12).
+- Retrieve top-`k₀` (e.g., 40) → **rerank** with `bge-reranker-v2-m3` (in-proc `candle` cross-encoder, or `gpu-runtime`) → keep top-`k` (8–12).
 
 ### 7.2 Answer generation (grounded)
 - Optional **context-condense pass**: a cheap LLM call extracts only query-relevant facts from reranked chunks before final generation (prevents context-window collapse).
@@ -515,7 +515,7 @@ Queue depth, ingestion rate, parse/embed/index latencies, retrieval p50/p95, ans
 - **Detector/heartbeat:** an orchestrator monitors job SLAs and worker acks; a unit with no ack within `timeout = max_proc + 2σ` flips `IN_PROGRESS → FAILED_RECOVERABLE`, increments retry, re-queues with a `recovery` header. After max retries (default 5) → **DLQ** and job → `PARTIAL_FAILURE`.
 - **Idempotency:** before committing, a worker checks results exist for the `content_sha256`/work-unit id; if so, ack without rewriting.
 - **Crash recovery:** unacked NATS messages redeliver; `IN_PROGRESS` units with stale `claimed_at` are reclaimed; persistence writes are transactional (`sqlx` tx) and replayable from blob.
-- **GPU failsafe:** on CUDA OOM or thermal throttle, gracefully **downgrade** (vLLM→`mistral.rs`/`llama.cpp`/CPU; `ort` CUDA EP→CPU EP) and log `HW-THERMAL-LIMIT` / `HW-OOM` with the affected job; alert.
+- **GPU failsafe:** on CUDA OOM or thermal throttle, gracefully **downgrade** (vLLM→`mistral.rs`/`llama.cpp`/CPU; candle CUDA/Metal device→CPU) and log `HW-THERMAL-LIMIT` / `HW-OOM` with the affected job; alert.
 - **Quarantine UI + re-inject:** quarantined items visible with reason, re-injectable after root-cause fix.
 - **Service-level recovery (Windows):** SCM recovery actions restart `diyragd` on crash; Linux uses `Restart=always` (systemd) or Docker `restart: unless-stopped` (§16b).
 
@@ -535,10 +535,10 @@ Queue depth, ingestion rate, parse/embed/index latencies, retrieval p50/p95, ans
 GPU is the **default** compute path for embeddings, reranking, OCR, and LLM inference; CPU is fallback only.
 
 - **Two interchangeable inference backends behind one interface (`gpu-runtime` gRPC/HTTP contract):**
-  - **Rust-native (default; cross-platform incl. Windows):** `ort` (ONNX Runtime; CUDA/TensorRT/DirectML/CoreML execution providers) for BGE-M3 embeddings + reranker; `mistral.rs`/`candle` for LLM generation. No Python.
-  - **Python `gpu-runtime` (Linux/CUDA throughput profile):** vLLM (paged attention, continuous batching) for the answer model; transformers for any model lacking an ONNX export; Surya/Marker for OCR.
-- **Containerization (Linux):** `docker-compose.gpu.yml` overlay uses the **NVIDIA Container Toolkit** (`deploy.resources.reservations.devices`); base image carries matching CUDA runtime; pin CUDA/cuDNN/torch (or ORT-CUDA) versions.
-- **Windows GPU:** `ort` with the **CUDA** or **DirectML** execution provider; `mistral.rs`/`candle` with CUDA. (vLLM is not targeted on Windows — the Rust-native backend is the Windows GPU path.) Documented in `deploy/windows/GPU.md`.
+  - **Rust-native (default; cross-platform incl. Windows):** `candle` (pure Rust; CPU default, **CUDA**/**Metal** via cargo features) for BGE-M3 **dense** embeddings + the bge-reranker cross-encoder; `mistral.rs`/`candle` for LLM generation. No Python, no ONNX Runtime (ADR-0009). candle has **no DirectML** path — AMD/Intel Windows GPUs fall back to CPU or the Python `gpu-runtime`.
+  - **Python `gpu-runtime` (Linux/CUDA throughput profile):** vLLM (paged attention, continuous batching) for the answer model; transformers for BGE-M3 **sparse** vectors (no candle head) and any model the Rust path can't run; Surya/Marker for OCR.
+- **Containerization (Linux):** `docker-compose.gpu.yml` overlay uses the **NVIDIA Container Toolkit** (`deploy.resources.reservations.devices`); base image carries matching CUDA runtime; pin CUDA/cuDNN/torch versions (a GPU build also compiles candle with `--features cuda`).
+- **Windows GPU:** `candle` with **CUDA**; `mistral.rs`/`candle` with CUDA. (vLLM is not targeted on Windows — the Rust-native backend is the Windows GPU path.) No DirectML — non-NVIDIA Windows GPUs run CPU (or the Python `gpu-runtime`). Documented in `deploy/windows/GPU.md`.
 - **Single point of GPU entry:** the inference backend owns the device(s), exposes `/embed`, `/rerank`, `/infer`, `/ocr`, and manages request queues + pre-allocated memory so a runaway job can't starve others.
 - **VRAM governance:** monitor context vs. model VRAM limit; minimize host↔device copies; on OOM/thermal, fall back to CPU and emit §14 hardware codes.
 - **Multi-GPU:** schedule by device (process isolation or sharding) and document the policy.
@@ -570,7 +570,7 @@ GPU is the **default** compute path for embeddings, reranking, OCR, and LLM infe
   - **recovery actions**: restart on 1st/2nd/3rd failure with backoff (set via `sc.exe failure` or the crate's config) → satisfies §14 service-level recovery.
 - **Lifecycle:** the service `service_main` registers a control handler for `Stop`/`Shutdown`/`Pause`/`Continue`, reports `Running`/`StopPending`/`Stopped` status, and on `Stop` cancels the Tokio runtime gracefully (drains in-flight work units, acks/naks NATS, flushes logs).
 - **Data & logs:** state under `%ProgramData%\diyRAG\` (config, certs, model cache, sqlite-bootstrap), logs to the **Windows Event Log** (via `eventlog`/`tracing` layer) **and** rolling JSON files; restricted ACLs (Administrators + the service account only).
-- **GPU under a service:** services run in session 0 with no desktop; the Rust-native `ort`/`mistral.rs` backend works headless. Document that CUDA/DirectML drivers must be installed machine-wide.
+- **GPU under a service:** services run in session 0 with no desktop; the Rust-native `candle`/`mistral.rs` backend works headless. Document that CUDA drivers must be installed machine-wide (candle is CUDA/CPU on Windows; no DirectML).
 - **Packaging:** ship an **MSI/winget** package (WiX/`cargo-wix`) that drops `diyragd.exe` + `diyrag.exe`, registers the service, and writes default config. **Fallback** wrapper (**WinSW** or **NSSM**) documented for environments that prefer not to use the native SCM integration. Binaries are **Authenticode-signed**.
 - **Native desktop client interaction:** the Tauri app detects the local service, shows its status, and exposes start/stop/restart (elevating via UAC), so a non-terminal user manages everything from the GUI; the service keeps running and ingesting even when the GUI is closed and across reboots.
 
@@ -644,7 +644,7 @@ unraid is a Slackware-based NAS OS whose first-class app model is **Docker**. di
 |---|---|---|
 | **M0 Bootstrap** | Cargo workspace, `common` crate (config/logging/correlation/errors/auth stubs), Compose skeleton, Postgres + sqlx migrations, health endpoints, CI (`fmt`/`clippy`/`test`/`deny`). | `just up` runs; healthchecks green; CI passes. |
 | **M1 Ingestion core** | Blob store (`object_store`), native parser router (PDF/DOCX/TXT/MD), chunker (`tokenizers`), single worker, Postgres persistence (no vectors). | One file → chunks in DB; idempotent on re-run. |
-| **M2 Vectors + retrieval** | Inference backend (`ort`/`fastembed` BGE-M3), Qdrant per-tenant collection, hybrid search + reranker, eval harness. | Ingest → hybrid search returns relevant chunks; eval runs. |
+| **M2 Vectors + retrieval** | Inference backend (`candle` BGE-M3 dense + reranker; sparse via `gpu-runtime`), Qdrant per-tenant collection, hybrid search + reranker, eval harness. | Ingest → hybrid search returns relevant chunks; eval runs. |
 | **M3 Answering** | Context-condense + `mistral.rs` grounded generation with citations + conflict flags. | `query/answer` returns cited answer; injection-test baseline. |
 | **M4 Scale ingestion** | NATS, parallel workers, batch orchestration (bomb guard), retention/logical-delete, remaining parsers (epub/mobi/scanned→Python parsing-service/Office/eml). | 25k-file batch completes; non-stop on failures; logical purge works. |
 | **M5 API + GUI** | api-gateway (authN/Z, rate-limit, validate), full REST/WS, React app (all screens), help-bubble, error viz, Tauri shell. | Browser + native smoke pass; help + error deep-links work. |
@@ -719,12 +719,12 @@ Carried forward from v1.0 with Rust-first and Windows/unraid additions.
 
 ## 24. OPEN DECISIONS FOR THE HUMAN (sane defaults assumed meanwhile)
 
-1. **Inference backend default:** assumed **Rust-native (`ort` + `mistral.rs`)** so the same release runs as a Windows Service and on unraid; **vLLM (Python)** auto-selected on Linux/CUDA throughput nodes. Confirm, or pin one backend everywhere.
+1. **Inference backend default:** assumed **Rust-native (`candle` + `mistral.rs`)** so the same release runs as a Windows Service and on unraid; **vLLM (Python)** auto-selected on Linux/CUDA throughput nodes (and supplying BGE-M3 sparse vectors). Confirm, or pin one backend everywhere. (ADR-0009 switched embed/rerank from `ort` to `candle`.)
 2. **Single-tenant vs multi-tenant:** assumed **multi-tenant with per-tenant Qdrant collections** (you cited different IPs/users/instances). If this is one private corpus for you alone, it collapses to one collection and simplifies sync.
 3. **"Sync the vectorized database":** assumed **Qdrant snapshot replication + content-addressed blob fetch + version-vector registry**. Confirm full corpus replication on every node (vs. a designated index node others query).
 4. **Broker:** assumed **NATS JetStream** (`async-nats`). Say if you prefer RabbitMQ or Kafka.
 5. **Windows runtime shape:** assumed **`all-in-one` `diyragd` as a Windows Service** for a single box, with the Tauri app as the GUI. If you want each service in its own container on Windows (Docker Desktop / WSL2), `diyragd --mode agent` orchestrates Compose instead — say which.
-6. **Python sidecar reach:** assumed Python is confined to `gpu-runtime` (when vLLM/OCR profile is on) and `parsing-service` (hard parses). If you want a **zero-Python** deployment, accept the trade-off: Rust-native OCR (`ocrs`/tesseract) and ONNX-only models, with reduced quality on scanned/complex documents.
+6. **Python sidecar reach:** assumed Python is confined to `gpu-runtime` (when vLLM/OCR/sparse profile is on) and `parsing-service` (hard parses). If you want a **zero-Python** deployment, accept the trade-off: Rust-native OCR (`ocrs`/tesseract) and **dense-only** retrieval (BGE-M3 sparse needs `gpu-runtime`; ADR-0009), with reduced quality on scanned/complex documents and on sparse-reliant queries.
 
 ---
 

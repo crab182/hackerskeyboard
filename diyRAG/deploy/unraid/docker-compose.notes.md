@@ -30,7 +30,7 @@ named-volume / bind paths at `/mnt/user/appdata/diyrag`:
 ├── postgres/                   # Postgres 16 data        (§5.1)
 ├── qdrant/                     # vector store            (§5.2)
 ├── minio/                      # blob store              (§5.3)
-├── models/                     # ONNX / mistral.rs cache (§16)
+├── models/                     # candle safetensors / mistral.rs cache (§16)
 └── certs/                      # mTLS CA + service certs (§12.1)
 ```
 
@@ -96,12 +96,13 @@ with `userscript-start.sh` (this folder).
 ## GPU notes (§16, §22 #14)
 
 - Only the **Python `gpu-runtime`** (vLLM/Surya OCR) and `parsing-service` use
-  the NVIDIA overlay's device reservations; the Rust-native `ort`/`mistral.rs`
+  the NVIDIA overlay's device reservations; the Rust-native `candle`/`mistral.rs`
   path claims the device in-process and is the default.
 - The overlay scopes GPUs via `NVIDIA_VISIBLE_DEVICES` (default `all`; prefer
   specific UUIDs) — it **never** uses `--privileged` and never mounts the whole
   device tree (§22 #14).
-- Match CUDA/cuDNN/torch (or ORT-CUDA) versions to the image; pin them (§16).
+- Match CUDA/cuDNN/torch versions to the image (a GPU build compiles candle with
+  `--features cuda`); pin them (§16).
 
 ## Security recap (§12.8 / §22 #14)
 

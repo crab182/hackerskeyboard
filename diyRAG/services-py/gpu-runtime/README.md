@@ -9,14 +9,14 @@
 
 This is the **only GPU-owning process** in the platform. It exists because a few
 models have no first-class Rust path: the **vLLM** throughput engine (paged
-attention + continuous batching), arbitrary **transformers** checkpoints lacking
-an ONNX export, and the **Surya/Marker** document-AI OCR stack. Python's ML
-ecosystem is irreplaceable for exactly these, so we isolate it behind a stable
-HTTP contract and keep it swappable.
+attention + continuous batching), arbitrary **transformers** checkpoints, BGE-M3
+**sparse** vectors (no candle head), and the **Surya/Marker** document-AI OCR
+stack. Python's ML ecosystem is irreplaceable for exactly these, so we isolate it
+behind a stable HTTP contract and keep it swappable.
 
 It is **not on the default path.** The cross-platform default is the
-**Rust-native backend** — `ort`/`fastembed` for BGE-M3 dense+sparse embeddings
-and the reranker, and `mistral.rs`/`candle` for the LLM (§16, §24.1). That is
+**Rust-native backend** — `candle` for BGE-M3 **dense** embeddings and the
+reranker, and `mistral.rs`/`candle` for the LLM (§16, §24.1, ADR-0009). That is
 what runs as a **Windows Service**, on CPU, and on low-VRAM nodes, with **no
 Python on the hot path**. This sidecar is only brought up under the `py-llm`
 and/or `ocr` Compose profiles on Linux/CUDA throughput nodes.
@@ -70,9 +70,9 @@ markers in `app/main.py`, scheduled for M2/M3 in §20).
 
 GPU is the default compute path; CPU is **fallback only** (§16). Set
 `DIYRAG_DEVICE=cpu`. On a real CPU-only deployment you would normally not run
-this service at all — use the Rust-native ONNX backend instead (next section).
+this service at all — use the Rust-native candle backend instead (next section).
 On CUDA OOM / thermal throttle the platform degrades gracefully (vLLM →
-`mistral.rs`/`llama.cpp`/CPU; ORT CUDA EP → CPU EP) and logs the `HW-OOM` /
+`mistral.rs`/`llama.cpp`/CPU; candle CUDA/Metal → CPU) and logs the `HW-OOM` /
 `HW-THERMAL-LIMIT` codes (§14); that fallback orchestration lives in the Rust
 tier, not here.
 

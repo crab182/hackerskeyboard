@@ -77,6 +77,8 @@ impl Parser for PdfTextParser {
         }
         // TODO: pdf_extract::extract_text_from_mem(&blob.bytes) for fast text;
         //       use lopdf to recover page boundaries + headings → Block list.
-        Err(ParseError::Permanent("pdf text extraction not yet implemented".into()))
+        Err(ParseError::Permanent(
+            "pdf text extraction not yet implemented".into(),
+        ))
     }
 }

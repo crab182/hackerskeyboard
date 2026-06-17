@@ -141,7 +141,7 @@ impl Supervisor {
             "ingestion-worker",
             "mcp-server",
             "sync-agent",
-            "inference-backend", // Rust-native ort/mistral.rs (§16)
+            "inference-backend", // Rust-native candle/mistral.rs (§16)
         ];
 
         let mut tasks = Vec::with_capacity(SERVICES.len());

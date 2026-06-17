@@ -85,17 +85,18 @@ infer = "0.16"
 notify = "7.0"
 globset = "0.4"
 
-# --- Tokenization & Rust-native inference (§3.2 / §16: tokenizers + ort) ---
-# ort uses `load-dynamic` (NOT download-binaries): no build-time binary fetch
-# and no ureq/native-tls/OpenSSL — honors rustls-everywhere (§12.1) and the
-# local/LAN-only + offline default. The node provides libonnxruntime at runtime
-# via ORT_DYLIB_PATH (vendored into the image / model-cache). See ADR-0008.
+# --- Tokenization & Rust-native inference (§3.2 / §16: tokenizers + candle) ---
+# candle is HuggingFace's pure-Rust ML framework: no ONNX Runtime, no C++ binary
+# to fetch at build time, no ureq/native-tls/OpenSSL — honors rustls-everywhere
+# (§12.1) and the local/LAN-only + offline default. CPU is the default backend so
+# the workspace builds anywhere; CUDA/Metal are opt-in cargo features enabled only
+# on GPU nodes (`--features candle-core/cuda`). Models load from a local
+# DIYRAG_MODEL_DIR (safetensors) — no Hub download at runtime. See ADR-0009
+# (supersedes ADR-0008, which pinned ort/load-dynamic).
 tokenizers = "0.21"
-ort = { version = "2.0.0-rc.9", default-features = false, features = [
-    "load-dynamic",
-    "cuda",
-    "directml",
-] }
+candle-core = "0.8"
+candle-nn = "0.8"
+candle-transformers = "0.8"
 
 # --- CLI (§16b: diyrag CLI via clap) ---
 clap = { version = "4.5", features = ["derive", "env"] }

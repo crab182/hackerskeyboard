@@ -97,7 +97,7 @@ journalctl -u diyragd -f      # follow logs (JSON; §13.1)
 - **Writable paths:** the unit confines writes to `/var/lib/diyrag` via
   `ReadWritePaths` + `StateDirectory`; `/etc/diyrag` stays read-only at runtime.
   If you add new state locations, extend `ReadWritePaths` accordingly.
-- **GPU:** for the Rust-native `ort`/`mistral.rs` path, ensure the `diyrag`
+- **GPU:** for the Rust-native `candle`/`mistral.rs` path, ensure the `diyrag`
   account can reach `/dev/nvidia*` (e.g. add it to the `video`/`render` group)
   and that drivers are installed machine-wide. Pin CUDA/cuDNN versions (§16).
 - **Uninstall:** `diyrag service uninstall` (or `sudo systemctl disable --now

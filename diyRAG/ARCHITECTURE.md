@@ -64,7 +64,7 @@ It ships two first-class runtimes:
 | `core-api` | Rust | `crates/core-api` | File/root management (`notify` watcher); batch orchestration (zip-bomb guard); RAG orchestration; retention/logical-delete. | §6, §7 |
 | `retrieval` | Rust | `crates/retrieval` | Qdrant hybrid (dense+sparse) search + RRF fusion + `ACTIVE` filter; cross-encoder rerank; context-condense. | §7 |
 | `ingestion-worker` | Rust | `crates/ingestion-worker` | NATS consumer; `ParserRouter` (native parsers + Python hard-parse delegation); chunker; embed client; atomic persist. | §6 |
-| `gpu-runtime` | **Python** | `services-py/gpu-runtime` | GPU `/embed` `/rerank` `/infer` `/ocr` (vLLM, BGE-M3, Surya/Marker). Optional — Rust `ort`/`mistral.rs` is the default backend. | §16 |
+| `gpu-runtime` | **Python** | `services-py/gpu-runtime` | GPU `/embed` `/rerank` `/infer` `/ocr` (vLLM, BGE-M3, Surya/Marker). Optional — Rust `candle`/`mistral.rs` is the default backend; also supplies BGE-M3 **sparse** vectors, which the in-proc candle backend does not (ADR-0009). | §16 |
 | `parsing-service` | **Python** | `services-py/parsing-service` | Hard document parses only (Docling, Surya/Marker OCR) via gRPC. | §6.3 |
 | `sync-agent` | Rust | `crates/sync-agent` | mDNS discovery + cert pinning; version-vector CRDT registry; Qdrant snapshot replication; mTLS gRPC. | §9 |
 | `mcp-server` | Rust | `crates/mcp-server` | Model Context Protocol (`rmcp`): Streamable HTTP + stdio; tools/resources; same RBAC as REST. | §8 |
@@ -81,7 +81,7 @@ It ships two first-class runtimes:
 
 ## 3. Data flow — ingestion (§2, §6)
 
-root/file registered → `core-api` records `PENDING`, enqueues idempotent work units (keyed by `content_sha256`) on NATS → `ingestion-worker` claims a unit → `ParserRouter` extracts text+structure with a **Rust-native parser**, delegating only *hard* documents (scanned PDFs, complex layout) to the Python `parsing-service` over gRPC → chunker (structure-aware, ~512 tok) → embed (`ort`/`fastembed` in-proc, or `gpu-runtime`) producing dense+sparse vectors → atomic persist (chunk row in Postgres + point in the tenant's Qdrant collection + original bytes in the blob store) → `INDEXED`. Failures are classified `TRANSIENT` (retry w/ backoff) or `PERMANENT` (quarantine); a bad file never halts the batch (§14).
+root/file registered → `core-api` records `PENDING`, enqueues idempotent work units (keyed by `content_sha256`) on NATS → `ingestion-worker` claims a unit → `ParserRouter` extracts text+structure with a **Rust-native parser**, delegating only *hard* documents (scanned PDFs, complex layout) to the Python `parsing-service` over gRPC → chunker (structure-aware, ~512 tok) → embed (in-proc `candle` for **dense**, or `gpu-runtime` for dense+**sparse**) producing dense+sparse vectors → atomic persist (chunk row in Postgres + point in the tenant's Qdrant collection + original bytes in the blob store) → `INDEXED`. Failures are classified `TRANSIENT` (retry w/ backoff) or `PERMANENT` (quarantine); a bad file never halts the batch (§14).
 
 ## 4. Data flow — query (§2, §7)
 
@@ -93,7 +93,7 @@ client → `api-gateway` (authN/Z, rate-limit) → `core-api` → `retrieval`: e
 
 Python lives in exactly two deployable services, each behind a stable gRPC/HTTP interface so it is swappable:
 
-1. **`gpu-runtime`** — embeddings/rerank/LLM/OCR. The **default** backend is Rust-native (`ort`/`fastembed` + `mistral.rs`/`candle`), which runs on Windows and Linux; the Python vLLM/transformers backend is selected on Linux/CUDA throughput nodes by profile.
+1. **`gpu-runtime`** — embeddings/rerank/LLM/OCR. The **default** backend is Rust-native (`candle` for dense embeddings + cross-encoder rerank, `mistral.rs`/`candle` for the LLM), which runs on Windows and Linux; the Python vLLM/transformers backend is selected on Linux/CUDA throughput nodes by profile and also supplies BGE-M3 **sparse** vectors, which the in-proc candle backend does not emit ([ADR-0009](./ADR/0009-candle-replaces-ort.md)).
 2. **`parsing-service`** — Docling + Surya/Marker for scanned/complex documents only. The Rust worker's native router handles every clean/digital format and spawns LibreOffice/Calibre as sandboxed children itself.
 
 Everything else is Rust. The common, well-formed ingestion path involves **no Python process at all**.
@@ -107,7 +107,7 @@ Everything else is Rust. The common, well-formed ingestion path involves **no Py
 | Shape | `diyragd` `--mode all-in-one` as a **Windows Service** | Docker Compose stack + CA template, or `diyragd --mode agent` | Compose, or `diyragd` under systemd |
 | Boot autostart | SCM `StartType::AutoStart` | Docker `restart: unless-stopped` + array auto-start (+ User Script) | systemd `WantedBy=multi-user.target`, `Restart=always` |
 | Control | `diyrag service …` (wraps SCM) / Tauri GUI | `diyrag` CLI + `docker compose` | `diyrag service …` (wraps systemctl) |
-| GPU | `ort` CUDA/DirectML, `mistral.rs` CUDA (no vLLM) | NVIDIA Container Toolkit; vLLM or Rust-native | NVIDIA toolkit |
+| GPU | `candle` CUDA (no DirectML; AMD/Intel → CPU or `gpu-runtime`), `mistral.rs` CUDA (no vLLM) | NVIDIA Container Toolkit; vLLM or Rust-native | NVIDIA toolkit |
 | Recovery | SCM failure actions (restart) | Docker restart policy | systemd `Restart=always` |
 
 A single `ServiceManager` trait (`WindowsScm` / `Systemd` / `DockerCompose`) gives the CLI an identical surface across all three (acceptance #9).

@@ -46,8 +46,12 @@ chrono = { workspace = true }
 # --- Chunking / tokenization (§6.4) ---
 tokenizers = { workspace = true }
 
-# --- Embedding backend client: in-proc ONNX OR gpu-runtime HTTP (§6.5 / §16) ---
-ort = { workspace = true }
+# --- Embedding backend: in-proc candle OR gpu-runtime HTTP (§6.5 / §16) ---
+# candle (pure-Rust, CPU default; CUDA/Metal opt-in on GPU nodes) replaces ort —
+# no ONNX Runtime, no OpenSSL. See ADR-0009.
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
+candle-transformers = { workspace = true }
 reqwest = { workspace = true }
 
 # --- gRPC client to the Python parsing-service for hard parses (§3.3 / §6.3) ---

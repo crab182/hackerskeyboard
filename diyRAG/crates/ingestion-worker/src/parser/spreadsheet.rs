@@ -39,6 +39,8 @@ impl Parser for SpreadsheetParser {
         // TODO: csv → csv::Reader, each row (or N-row window) → Block (Table).
         //       xlsx/xls → calamine::open_workbook_from_rs, iterate worksheets,
         //       emit per-sheet heading + tabular Blocks rendered as markdown.
-        Err(ParseError::Permanent("spreadsheet parsing not yet implemented".into()))
+        Err(ParseError::Permanent(
+            "spreadsheet parsing not yet implemented".into(),
+        ))
     }
 }
