@@ -1,0 +1,16 @@
+[package]
+name = "diyrag-launch-gate"
+version = "0.1.0"
+edition = "2021"
+description = "diyRAG launch gate (456468ann): local/LAN-only readiness aggregator that opens only when every plan/runtime item is ready."
+
+[[bin]]
+name = "launch-gate"
+path = "src/main.rs"
+
+# Detached from the parent diyRAG workspace ON PURPOSE: this prototype has ZERO
+# external dependencies (std only) so it builds, tests, and runs fully offline.
+[workspace]
+
+[profile.release]
+opt-level = 2
