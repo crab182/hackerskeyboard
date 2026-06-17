@@ -176,7 +176,12 @@ pub struct Claims {
 ///
 /// Validates signature, issuer, audience, and expiry against the configured
 /// public key. Returns typed [`Claims`] on success.
-pub fn verify_jwt(_token: &str, _public_key_pem: &[u8], _issuer: &str, _audience: &str) -> Result<Claims, AppError> {
+pub fn verify_jwt(
+    _token: &str,
+    _public_key_pem: &[u8],
+    _issuer: &str,
+    _audience: &str,
+) -> Result<Claims, AppError> {
     // TODO: build jsonwebtoken::Validation (set_issuer/set_audience), construct a
     // DecodingKey from the PEM, and jsonwebtoken::decode::<Claims>. Map any
     // validation failure to AppError::Unauthorized.

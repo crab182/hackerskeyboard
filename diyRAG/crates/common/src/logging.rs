@@ -66,9 +66,9 @@ where
 /// handling the request carry it (spec §13.1). Wire this into each service's
 /// Axum router via `.layer(trace_layer())`.
 #[must_use]
-pub fn trace_layer() -> TraceLayer<
-    tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>,
-> {
+pub fn trace_layer(
+) -> TraceLayer<tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>>
+{
     // TODO: customize make_span_with to read the X-Correlation-ID header (or
     // mint one via CorrelationId::from_header_or_new) and record it as a
     // `correlation_id` span field. Default classifier is fine for liveness.
