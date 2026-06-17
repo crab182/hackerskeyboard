@@ -3,7 +3,7 @@
 A labeled `query → relevant-doc` evaluation set and a runner that reports **nDCG@10, recall@k, and MRR** (spec §7, §18). Used to gate merges: any change that regresses retrieval quality below the recorded baseline fails CI.
 
 ## What it gates
-- Embedding model / backend swaps (e.g., Rust-native `ort`/`fastembed` ↔ Python BGE-M3; ADR-0004).
+- Embedding model / backend swaps (e.g., Rust-native `candle` ↔ Python BGE-M3; ADR-0004 / ADR-0009).
 - Chunking parameter changes (size/overlap/structure rules).
 - Reranker changes and fusion-weight (RRF vs weighted) tuning.
 - Context-condense on/off.

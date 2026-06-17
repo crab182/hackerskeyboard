@@ -86,9 +86,11 @@ pub async fn hybrid_search(
 
 /// Embed a query string into BGE-M3 dense + sparse vectors (spec §7.1 / §16).
 ///
-/// DECISION: embedding can run in-process via `ort`/`fastembed` OR be delegated
-/// to `gpu-runtime` `/embed`. We default to the gpu-runtime HTTP path here so the
-/// retrieval service stays light; swap to in-proc ORT behind the same signature.
+/// DECISION: embedding can run in-process via candle OR be delegated to
+/// `gpu-runtime` `/embed`. We default to the gpu-runtime HTTP path here so the
+/// retrieval service stays light; swap to the in-proc candle backend behind the
+/// same signature (ADR-0009). Note: the in-proc candle path yields the **dense**
+/// vector only — BGE-M3 **sparse** comes from `gpu-runtime`.
 async fn embed_query(
     state: &RetrievalState,
     _query: &str,

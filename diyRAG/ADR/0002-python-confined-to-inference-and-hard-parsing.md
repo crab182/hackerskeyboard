@@ -21,4 +21,4 @@ The Rust `ingestion-worker` handles every clean/digital format with native crate
 
 ## Alternatives considered
 - **All-Python** — simplest ML story, rejected per ADR-0001.
-- **Zero-Python (Rust ONNX/`ocrs` only)** — possible but materially worse on scanned/complex documents; offered as an opt-in profile, not the default.
+- **Zero-Python (Rust `candle`/`ocrs` only)** — possible but materially worse on scanned/complex documents and limited to dense-only retrieval (BGE-M3 sparse needs the Python `gpu-runtime`; ADR-0009); offered as an opt-in profile, not the default.

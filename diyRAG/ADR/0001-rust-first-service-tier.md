@@ -11,7 +11,7 @@ Implement the entire service tier in **Rust**: `api-gateway`, `core-api`, `retri
 ## Consequences
 **Easier:** single static binary per service → tiny `scratch`/`distroless` images; no GC pauses → predictable tail latency; memory safety removes buffer-overflow/UAF/data-race CVE classes by construction; one toolchain (`cargo`) for build/test/lint; trivial cross-compile to a Windows service binary; `#![forbid(unsafe_code)]` is enforceable in CI.
 
-**Harder:** higher upfront ramp on ownership/borrow-checker and async Rust; the ML/LLM ecosystem is thinner than Python's (addressed by ADR-0002/0004 — Python sidecars + `ort`/`mistral.rs`); some libraries (Docling, Surya/Marker) have no Rust peer.
+**Harder:** higher upfront ramp on ownership/borrow-checker and async Rust; the ML/LLM ecosystem is thinner than Python's (addressed by ADR-0002/0004/0009 — Python sidecars + `candle`/`mistral.rs`); some libraries (Docling, Surya/Marker) have no Rust peer.
 
 **Follow-ups:** keep every external boundary behind a trait (`Parser`, `EmbeddingBackend`, `LlmBackend`, `VectorStore`, `ServiceManager`) so components stay swappable; gate CI on `fmt` + `clippy -D warnings` + `cargo-deny` + `cargo-audit`.
 

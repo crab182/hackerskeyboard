@@ -10,8 +10,7 @@ use async_trait::async_trait;
 use super::{BlobRef, Confidence, MimeSniff, ParseError, ParseOpts, Parser, StructuredDoc};
 
 const DOCX_MIME: &str = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const PPTX_MIME: &str =
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const PPTX_MIME: &str = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 /// Handles `.docx` and `.pptx`.
 pub struct OoxmlParser;
@@ -47,6 +46,8 @@ impl Parser for OoxmlParser {
         //       for pptx iterate `ppt/slides/slideN.xml`; stream with quick-xml,
         //       map paragraph styles → headings, tables → markdown Blocks.
         //       On structural failure, delegate to Docling (parsing-service).
-        Err(ParseError::Permanent("ooxml parsing not yet implemented".into()))
+        Err(ParseError::Permanent(
+            "ooxml parsing not yet implemented".into(),
+        ))
     }
 }

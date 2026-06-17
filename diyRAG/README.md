@@ -45,13 +45,16 @@ interfaces, where its ML ecosystem is irreplaceable:
 
 | Sidecar | Why Python | Endpoints |
 |---|---|---|
-| `gpu-runtime` | vLLM throughput + transformers for ONNX-less models + Surya/Marker OCR | `/embed` `/rerank` `/infer` `/ocr` |
+| `gpu-runtime` | vLLM throughput + transformers + BGE-M3 **sparse** vectors + Surya/Marker OCR | `/embed` `/rerank` `/infer` `/ocr` |
 | `parsing-service` | Docling layout/table + Surya/Marker for scanned/complex docs | gRPC hard-parse |
 
-Rust-native equivalents (`ort`/`fastembed` for embeddings + rerank,
-`mistral.rs` for the LLM, a native parser router) are the **default** and the
-only GPU path on Windows. The common, well-formed document path involves **no
-Python process at all**.
+Rust-native equivalents (`candle` for **dense** embeddings + cross-encoder
+rerank, `mistral.rs` for the LLM, a native parser router) are the **default**
+and the only GPU path on Windows. candle runs on CPU/CUDA/Metal — there is no
+DirectML, so AMD/Intel Windows GPUs fall back to CPU or the `gpu-runtime`,
+which is also where BGE-M3 **sparse** vectors come from
+([ADR-0009](ADR/0009-candle-replaces-ort.md)). The common, well-formed
+document path involves **no Python process at all**.
 
 ## Architecture (summary)
 

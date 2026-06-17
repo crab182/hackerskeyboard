@@ -182,4 +182,4 @@ Remove with `nssm stop diyRAG` then `nssm remove diyRAG confirm`.
 - **Sign the binaries.** `diyragd.exe`, `diyrag.exe`, and the wrapper `.exe`
   should be Authenticode-signed before distribution (§16b.2).
 - **GPU under session 0.** A wrapped service still runs headless in session 0;
-  the Rust-native `ort`/`mistral.rs` backend works there — see `GPU.md`.
+  the Rust-native `candle`/`mistral.rs` backend works there — see `GPU.md`.

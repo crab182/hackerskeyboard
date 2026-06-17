@@ -20,7 +20,9 @@ pub enum PersistError {
 
 /// Idempotency gate: is there already an `INDEXED` document for
 /// `(tenant_id, content_sha256)`? (§6.2). If so the worker acks without work.
-pub async fn is_already_indexed(/* db: &sqlx::PgPool, */ unit: &WorkUnit) -> Result<bool, PersistError> {
+pub async fn is_already_indexed(
+    /* db: &sqlx::PgPool, */ unit: &WorkUnit,
+) -> Result<bool, PersistError> {
     // TODO: SELECT 1 FROM documents
     //       WHERE tenant_id = $1 AND content_sha256 = $2 AND status = 'INDEXED'
     //       (parameterized — §12.4). Returns true if found.

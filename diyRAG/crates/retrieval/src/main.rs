@@ -25,8 +25,8 @@ use axum::{Json, Router};
 use diyrag_common::config::AppConfig;
 use diyrag_common::correlation::CorrelationId;
 use diyrag_common::errors::AppError;
-use diyrag_common::vector::QdrantStore;
 use diyrag_common::logging;
+use diyrag_common::vector::QdrantStore;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use uuid::Uuid;
@@ -38,7 +38,7 @@ pub struct RetrievalState {
     pub config: Arc<AppConfig>,
     /// Qdrant-backed vector store (per-tenant collections, spec §5.2).
     pub store: Arc<QdrantStore>,
-    /// The reranker backend (in-proc ONNX or gpu-runtime HTTP, spec §7.1).
+    /// The reranker backend (in-proc candle or gpu-runtime HTTP, spec §7.1).
     pub reranker: Arc<rerank::Reranker>,
     /// HTTP client for the embedding/condense backend (gpu-runtime, spec §16).
     pub http: reqwest::Client,
@@ -48,8 +48,8 @@ pub struct RetrievalState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let config =
-        AppConfig::load(Some("config/retrieval.toml")).context("loading retrieval configuration")?;
+    let config = AppConfig::load(Some("config/retrieval.toml"))
+        .context("loading retrieval configuration")?;
     logging::init(&config.observability).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     info!(service = %config.service_name, "starting retrieval");
 
@@ -163,10 +163,7 @@ async fn search(
     let scored = hybrid::hybrid_search(&state, &req, correlation_id).await?;
 
     // 2. Rerank the top-k₀ down to k (spec §7.1).
-    let reranked = state
-        .reranker
-        .rerank(&req.query, scored, req.k)
-        .await?;
+    let reranked = state.reranker.rerank(&req.query, scored, req.k).await?;
 
     // 3. Optional context-condense pass (spec §7.2).
     let condensed_context = if req.condense {

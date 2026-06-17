@@ -10,9 +10,10 @@ readme = "README.md"
 # Dependency policy (MASTER_BUILD_SPEC.md §3, §16, §19)
 # ---------------------------------------------------------------------------
 # This service is SELECTED ONLY by the `py-llm` and OCR profiles (§17). On every
-# other node the Rust-native backend (`ort`/`fastembed` for embeddings+rerank,
-# `mistral.rs`/`candle` for the LLM) is the DEFAULT and no Python runs on the
-# hot path (§16, §24.1). Keep this surface small and swappable behind the
+# other node the Rust-native backend (`candle` for dense embeddings+rerank,
+# `mistral.rs`/`candle` for the LLM; ADR-0009) is the DEFAULT and no Python runs
+# on the hot path (§16, §24.1). This service still supplies BGE-M3 *sparse*
+# vectors (no candle head). Keep this surface small and swappable behind the
 # `/embed` `/rerank` `/infer` `/ocr` gRPC/HTTP contract.
 #
 # Versions are PINNED (§19). Bump deliberately; CUDA/cuDNN/torch must match the
@@ -36,7 +37,7 @@ dependencies = [
   # `torch.load(weights_only=True)` RCE (GHSA-53q9-r3pm-6pq6), and < 2.6.0 also
   # re-enables the vLLM malicious-model RCE bypass CVE-2025-24357.
   "torch==2.6.0",
-  "transformers==4.47.1",        # fallback for models lacking an ONNX export
+  "transformers==4.47.1",        # BGE-M3 sparse + models the candle path can't run
   "tokenizers==0.21.0",
 
   # --- Embeddings + reranker (BGE-M3 dense+sparse, bge-reranker-v2-m3) -----

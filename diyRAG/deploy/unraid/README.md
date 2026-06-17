@@ -116,7 +116,7 @@ diyrag query "smoke test" --answer                                 # cited answe
   `NVIDIA_VISIBLE_DEVICES`.
 - The overlay scopes devices via `NVIDIA_VISIBLE_DEVICES` (prefer specific GPU
   UUIDs over `all`) and **never** uses `--privileged` (§22 #14). The Rust-native
-  `ort`/`mistral.rs` backend is the default and claims the device in-process;
+  `candle`/`mistral.rs` backend is the default and claims the device in-process;
   the Python `gpu-runtime` (vLLM) is the optional Linux/CUDA throughput profile.
 
 ---
