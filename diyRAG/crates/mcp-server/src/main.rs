@@ -36,9 +36,16 @@ enum Transport {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Container HEALTHCHECK form (`mcp-server healthcheck`): liveness only — the
+    // Streamable HTTP server (and its /healthz) is still scaffold, so the probe
+    // can't be HTTP yet. Upgrade to `http_healthcheck` once /healthz is served.
+    if diyrag_common::health::is_healthcheck_invocation() {
+        std::process::exit(diyrag_common::health::liveness_ok());
+    }
+
     // 1. Typed config (§0/§19).
-    let config =
-        AppConfig::load(Some("config/mcp-server.toml")).context("loading mcp-server configuration")?;
+    let config = AppConfig::load(Some("config/mcp-server.toml"))
+        .context("loading mcp-server configuration")?;
 
     // 2. Logging. DECISION: under the stdio transport, logs MUST NOT pollute
     //    stdout (it is the MCP byte stream). The common logger writes to the

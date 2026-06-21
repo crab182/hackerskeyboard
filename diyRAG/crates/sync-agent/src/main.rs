@@ -26,9 +26,15 @@ use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Container HEALTHCHECK form (`sync-agent healthcheck`): liveness only — the
+    // agent serves gRPC (mTLS) to peers, not HTTP /healthz, so no HTTP probe yet.
+    if diyrag_common::health::is_healthcheck_invocation() {
+        std::process::exit(diyrag_common::health::liveness_ok());
+    }
+
     // 1. Typed config (§0/§19): no hardcoded hosts/ports.
-    let config =
-        AppConfig::load(Some("config/sync-agent.toml")).context("loading sync-agent configuration")?;
+    let config = AppConfig::load(Some("config/sync-agent.toml"))
+        .context("loading sync-agent configuration")?;
 
     // 2. Structured JSON logging from diyrag-common (§13.1).
     logging::init(&config.observability).map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -58,7 +64,9 @@ async fn main() -> anyhow::Result<()> {
     let discovery_handle = {
         let (peers, cancel) = (peers.clone(), cancel.clone());
         tokio::spawn(async move {
-            if let Err(e) = discovery::run_discovery(peers, self_node_id, self_endpoint, cancel).await {
+            if let Err(e) =
+                discovery::run_discovery(peers, self_node_id, self_endpoint, cancel).await
+            {
                 warn!(error = %e, "discovery loop exited with error");
             }
         })

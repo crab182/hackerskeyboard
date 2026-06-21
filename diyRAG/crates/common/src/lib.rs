@@ -23,6 +23,7 @@ pub mod config;
 pub mod correlation;
 pub mod db;
 pub mod errors;
+pub mod health;
 pub mod ids;
 pub mod logging;
 pub mod schemas;

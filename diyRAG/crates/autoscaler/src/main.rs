@@ -81,7 +81,10 @@ impl QueueDepthSource for JetStreamDepth {
         // `depth`; derive `rate` from the delivered-count delta between polls.
         // ASSERT (debug) the subject is the ingest subject, never a query subject
         // (§22 #7).
-        Ok(QueueObservation { depth: 0, rate: 0.0 })
+        Ok(QueueObservation {
+            depth: 0,
+            rate: 0.0,
+        })
     }
 }
 
@@ -89,7 +92,10 @@ impl QueueDepthSource for JetStreamDepth {
 /// Windows) — mirrors the §16b.4 `ServiceManager` abstraction.
 pub enum FleetScaler {
     /// `docker compose up -d --scale ingestion-worker=N` (Linux/unraid, §16b.3).
-    DockerCompose { compose_file: String, service: String },
+    DockerCompose {
+        compose_file: String,
+        service: String,
+    },
     /// Adjust `diyragd` ingestion task count (Windows all-in-one, §16b.1).
     WindowsTaskCount,
 }
@@ -112,7 +118,10 @@ impl Scaler for FleetScaler {
 
     async fn scale_to(&self, target: usize) -> anyhow::Result<()> {
         match self {
-            FleetScaler::DockerCompose { compose_file, service } => {
+            FleetScaler::DockerCompose {
+                compose_file,
+                service,
+            } => {
                 let _ = (compose_file, service, target);
                 // TODO: spawn `docker compose -f {compose_file} up -d
                 // --scale {service}={target}` via tokio::process::Command; check
@@ -131,9 +140,15 @@ impl Scaler for FleetScaler {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Container HEALTHCHECK form (`autoscaler healthcheck`): liveness only — the
+    // autoscaler is a broker-queue controller and serves no HTTP /healthz (§16b).
+    if diyrag_common::health::is_healthcheck_invocation() {
+        std::process::exit(diyrag_common::health::liveness_ok());
+    }
+
     // 1. Typed config (§0/§19).
-    let config =
-        AppConfig::load(Some("config/autoscaler.toml")).context("loading autoscaler configuration")?;
+    let config = AppConfig::load(Some("config/autoscaler.toml"))
+        .context("loading autoscaler configuration")?;
 
     // 2. Logging (§13.1).
     logging::init(&config.observability).map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -228,7 +243,10 @@ mod tests {
     #[async_trait]
     impl QueueDepthSource for FakeDepth {
         async fn observe(&self) -> anyhow::Result<QueueObservation> {
-            Ok(QueueObservation { depth: self.0, rate: 0.0 })
+            Ok(QueueObservation {
+                depth: self.0,
+                rate: 0.0,
+            })
         }
     }
 

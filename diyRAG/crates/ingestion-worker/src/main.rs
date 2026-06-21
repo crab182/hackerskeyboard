@@ -39,6 +39,12 @@ pub struct WorkUnit {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Container HEALTHCHECK form (`ingestion-worker healthcheck`): liveness only —
+    // the worker drains NATS and serves no HTTP /healthz yet (§16b TODO).
+    if diyrag_common::health::is_healthcheck_invocation() {
+        std::process::exit(diyrag_common::health::liveness_ok());
+    }
+
     // 1. Logging + typed config from the shared crate (§0, §13.1).
     // TODO: diyrag_common::logging::init_json_subscriber()?;
     // TODO: let cfg = diyrag_common::config::load::<WorkerConfig>()?;
