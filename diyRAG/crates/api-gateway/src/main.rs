@@ -17,6 +17,8 @@ mod routes;
 use std::sync::Arc;
 
 use anyhow::Context;
+use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::get;
 use axum::Router;
 use diyrag_common::config::AppConfig;
@@ -87,16 +89,22 @@ async fn main() -> anyhow::Result<()> {
 
 /// Assemble the router: health endpoints + versioned API + middleware stack.
 fn build_app(state: GatewayState) -> Router {
+    // Public liveness/readiness (spec §11.2). No auth, no rate limit. `readyz`
+    // probes upstream `core-api`, so this sub-router carries `GatewayState` and
+    // binds it with `.with_state`, yielding a stateless `Router<()>` that merges
+    // into the outer app alongside the (also stateless) `/api/v1` surface.
+    let health = Router::new()
+        .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
+        .with_state(state.clone());
+
     // `routes::router` binds the state internally and returns a stateless
-    // `Router<()>`; the public probes below are stateless too, so the assembled
-    // app needs no further `.with_state` (nesting a `Router<()>` fixes the outer
-    // state to `()`).
+    // `Router<()>` too, so the assembled app is `Router<()>` and needs no further
+    // `.with_state`.
     let api = routes::router(state);
 
     Router::new()
-        // Public liveness/readiness (spec §11.2). No auth, no rate limit.
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
+        .merge(health)
         // Versioned, protected API surface. CORS, request-body-size cap, per-IP
         // rate limiting, authN/Z (per-route), and schema validation are applied
         // INSIDE `routes::router` so they wrap only the protected surface and the
@@ -113,14 +121,54 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-/// Readiness probe — gateway can reach `core-api` (spec §11.2).
-async fn readyz() -> &'static str {
-    // TODO: probe upstream core-api `/healthz`; return 503 if unreachable.
-    "ready"
+/// Readiness probe — the gateway is ready iff it can reach `core-api` (spec
+/// §11.2). A short timeout keeps the probe cheap; any non-success or transport
+/// error yields 503 so orchestrators (and the `456468ann` launch gate) treat the
+/// edge as not-ready until the upstream is up.
+async fn readyz(State(state): State<GatewayState>) -> StatusCode {
+    let url = core_api_health_url(&state.core_api_base);
+    let ok = matches!(
+        state
+            .http
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(2))
+            .send()
+            .await,
+        Ok(resp) if resp.status().is_success()
+    );
+    if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    }
+}
+
+/// Build the upstream `core-api` `/healthz` URL from its base, tolerating a
+/// trailing slash on the configured base (no double `//`).
+fn core_api_health_url(core_api_base: &str) -> String {
+    format!("{}/healthz", core_api_base.trim_end_matches('/'))
 }
 
 /// Resolve when SIGTERM/Ctrl-C is received, for graceful drain (spec §14).
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
     info!("shutdown signal received; draining");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn core_api_health_url_handles_trailing_slash() {
+        assert_eq!(
+            core_api_health_url("https://core-api:8081"),
+            "https://core-api:8081/healthz"
+        );
+        // A trailing slash on the base must not produce a double slash.
+        assert_eq!(
+            core_api_health_url("https://core-api:8081/"),
+            "https://core-api:8081/healthz"
+        );
+    }
 }
