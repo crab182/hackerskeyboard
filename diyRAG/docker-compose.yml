@@ -162,7 +162,10 @@ services:
     <<: *rust-svc
     build:
       context: .
-      dockerfile: crates/api-gateway/Dockerfile
+      dockerfile: infra/rust-service.Dockerfile
+      args:
+        BIN: diyrag-api-gateway
+        OUT: api-gateway
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -180,7 +183,10 @@ services:
     <<: *rust-svc
     build:
       context: .
-      dockerfile: crates/core-api/Dockerfile
+      dockerfile: infra/rust-service.Dockerfile
+      args:
+        BIN: diyrag-core-api
+        OUT: core-api
     depends_on:
       postgres: { condition: service_healthy }
       qdrant: { condition: service_healthy }
@@ -198,7 +204,10 @@ services:
     <<: *rust-svc
     build:
       context: .
-      dockerfile: crates/retrieval/Dockerfile
+      dockerfile: infra/rust-service.Dockerfile
+      args:
+        BIN: diyrag-retrieval
+        OUT: retrieval
     depends_on:
       qdrant: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -212,7 +221,10 @@ services:
     <<: *rust-svc
     build:
       context: .
-      dockerfile: crates/ingestion-worker/Dockerfile
+      dockerfile: infra/rust-service.Dockerfile
+      args:
+        BIN: diyrag-ingestion-worker
+        OUT: ingestion-worker
     depends_on:
       nats: { condition: service_healthy }
       postgres: { condition: service_healthy }
@@ -232,7 +244,10 @@ services:
     <<: *rust-svc
     build:
       context: .
-      dockerfile: crates/sync-agent/Dockerfile
+      dockerfile: infra/rust-service.Dockerfile
+      args:
+        BIN: diyrag-sync-agent
+        OUT: sync-agent
     depends_on:
       postgres: { condition: service_healthy }
       qdrant: { condition: service_healthy }
@@ -250,7 +265,10 @@ services:
     <<: *rust-svc
     build:
       context: .
-      dockerfile: crates/mcp-server/Dockerfile
+      dockerfile: infra/rust-service.Dockerfile
+      args:
+        BIN: diyrag-mcp-server
+        OUT: mcp-server
     depends_on:
       core-api: { condition: service_healthy }
     healthcheck:
@@ -263,7 +281,10 @@ services:
     <<: *rust-svc
     build:
       context: .
-      dockerfile: crates/autoscaler/Dockerfile
+      dockerfile: infra/rust-service.Dockerfile
+      args:
+        BIN: diyrag-autoscaler
+        OUT: autoscaler
     depends_on:
       nats: { condition: service_healthy }
     healthcheck:

@@ -45,6 +45,14 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load(Some("config/api-gateway.toml"))
         .context("loading api-gateway configuration")?;
 
+    // Container HEALTHCHECK form (`api-gateway healthcheck`): probe our own
+    // /healthz on loopback and exit, instead of booting a second server (§16b).
+    if diyrag_common::health::is_healthcheck_invocation() {
+        std::process::exit(diyrag_common::health::http_healthcheck(
+            &config.http.bind_addr,
+        ));
+    }
+
     // 2. Initialize structured JSON logging from diyrag-common.
     logging::init(&config.observability).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     info!(service = %config.service_name, "starting api-gateway");

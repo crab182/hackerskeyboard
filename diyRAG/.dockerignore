@@ -1,0 +1,22 @@
+# Keep the Docker build context small, fast, and free of secrets (§12.1/§12.8).
+# Build artifacts (the largest directory by far):
+target/
+**/target/
+
+# VCS + CI:
+.git/
+.gitignore
+.github/
+
+# Secrets / local env — MUST never enter an image build context:
+.env
+.env.*
+!.env.example
+
+# Local model caches / data (mounted as volumes at runtime, not baked in):
+**/*.safetensors
+**/*.onnx
+
+# Logs + editor cruft:
+*.log
+**/.DS_Store

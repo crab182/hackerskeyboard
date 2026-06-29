@@ -49,6 +49,14 @@ async fn main() -> anyhow::Result<()> {
     let config =
         AppConfig::load(Some("config/core-api.toml")).context("loading core-api configuration")?;
 
+    // Container HEALTHCHECK form (`core-api healthcheck`): probe our own /healthz
+    // on loopback and exit, instead of booting a second server (§16b).
+    if diyrag_common::health::is_healthcheck_invocation() {
+        std::process::exit(diyrag_common::health::http_healthcheck(
+            &config.http.bind_addr,
+        ));
+    }
+
     // 2. Initialize structured JSON logging.
     logging::init(&config.observability).map_err(|e| anyhow::anyhow!(e.to_string()))?;
     info!(service = %config.service_name, "starting core-api");
@@ -120,7 +128,10 @@ fn build_app(state: CoreState) -> Router {
         .route("/readyz", get(readyz))
         // File / root management (spec §6.1, §6.6, §11.2).
         .route("/api/v1/files/roots", post(files::register_root))
-        .route("/api/v1/files/roots/{id}", axum::routing::delete(roots::deactivate_root))
+        .route(
+            "/api/v1/files/roots/{id}",
+            axum::routing::delete(roots::deactivate_root),
+        )
         .route(
             "/api/v1/files/roots/{id}/reactivate",
             post(roots::reactivate_root),
